@@ -1,0 +1,44 @@
+# Soccer Rig - Python Dependencies
+
+# Web Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+gunicorn>=21.0.0
+
+# Camera (Pi-specific, installed via apt)
+# picamera2 - installed via apt python3-picamera2
+
+# System monitoring
+psutil>=5.9.0
+
+# Configuration
+pyyaml>=6.0.0
+
+# Async operations
+aiohttp>=3.9.0
+aiofiles>=23.0.0
+
+# Networking
+netifaces>=0.11.0
+zeroconf>=0.131.0
+
+# Audio
+simpleaudio>=1.0.4
+
+# Hashing/Checksums
+hashlib-compat>=1.0.0; python_version < "3.11"
+
+# HTTP client for updates
+requests>=2.31.0
+
+# Process management
+python-prctl>=1.8.1; sys_platform == "linux"
+
+# GPIO (Pi-specific)
+# RPi.GPIO - installed via apt
+
+# Date/time handling
+python-dateutil>=2.8.0
+
+# Logging (structured)
+structlog>=24.0.0

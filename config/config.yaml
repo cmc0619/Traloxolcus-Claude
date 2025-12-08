@@ -1,0 +1,53 @@
+# Soccer Rig Configuration
+# Default configuration file
+
+camera:
+  id: CAM_C
+  position: center
+  resolution_width: 3840
+  resolution_height: 2160
+  fps: 30
+  codec: h265
+  bitrate_mbps: 30
+  container: mp4
+  audio_enabled: false
+  test_duration_sec: 10
+
+network:
+  mesh_ssid: SOCCER_MESH
+  mesh_password: soccer_rig_2024
+  ap_fallback_enabled: true
+  ap_fallback_timeout_sec: 30
+  ap_ssid_prefix: SOCCER_CAM_
+  ap_password: soccercam123
+  web_port: 8080
+  api_base_path: /api/v1
+
+storage:
+  recordings_path: /mnt/nvme/recordings
+  manifests_path: /mnt/nvme/manifests
+  min_free_space_gb: 10.0
+  auto_delete_offloaded: true
+  delete_after_confirm: false
+
+sync:
+  is_master: false
+  master_ip: ""
+  max_offset_ms: 5.0
+  chrony_config_path: /etc/chrony/chrony.conf
+  sync_check_interval_sec: 10
+
+update:
+  github_repo: ""
+  check_on_boot: false
+  auto_apply: false
+
+audio:
+  enabled: true
+  volume: 80
+  beep_on_record_start: true
+  beep_on_record_stop: true
+  beep_on_error: true
+  beep_on_sync: true
+
+production_mode: true

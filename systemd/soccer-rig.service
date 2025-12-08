@@ -1,0 +1,31 @@
+[Unit]
+Description=Soccer Rig Camera Node
+Documentation=https://github.com/soccer-rig/soccer-rig
+After=network.target
+Wants=chrony.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/soccer-rig
+Environment=PYTHONPATH=/opt/soccer-rig/src
+ExecStart=/opt/soccer-rig/venv/bin/python -m soccer_rig.app
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/mnt/nvme /var/lib/soccer-rig /var/log/soccer_rig
+PrivateTmp=true
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=90%
+
+[Install]
+WantedBy=multi-user.target

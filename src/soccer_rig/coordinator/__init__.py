@@ -58,7 +58,7 @@ class Coordinator:
     Can also run on any node to provide aggregated view.
     """
 
-    def __init__(self, config, local_recorder=None, local_sync=None):
+    def __init__(self, config, local_recorder=None, local_sync=None, local_storage=None):
         """
         Initialize coordinator.
 
@@ -66,10 +66,12 @@ class Coordinator:
             config: Configuration object
             local_recorder: Local CameraRecorder instance
             local_sync: Local SyncManager instance
+            local_storage: Local StorageManager instance
         """
         self.config = config
         self.local_recorder = local_recorder
         self.local_sync = local_sync
+        self.local_storage = local_storage
         self.local_camera_id = config.camera.id
 
         self._peers: Dict[str, PeerNode] = {}
@@ -701,8 +703,11 @@ class Coordinator:
 
             try:
                 if peer["is_local"]:
-                    # Would need storage manager reference
-                    recordings = []
+                    # Get local recordings from storage manager
+                    if self.local_storage:
+                        recordings = self.local_storage.list_recordings()
+                    else:
+                        recordings = []
                 else:
                     p = self._peers.get(camera_id)
                     if p:

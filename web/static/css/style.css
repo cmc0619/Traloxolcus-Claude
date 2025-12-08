@@ -867,6 +867,14 @@ body {
     margin-bottom: 8px;
 }
 
+.recording-details .success {
+    color: var(--success);
+}
+
+.recording-details .warning {
+    color: var(--warning);
+}
+
 .recording-actions {
     display: flex;
     gap: 8px;

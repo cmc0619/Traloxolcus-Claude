@@ -455,6 +455,34 @@ def create_api_blueprint(app_context):
             return jsonify(result), 200
         return jsonify(result), 400
 
+    @api.route("/recordings/<recording_id>/download", methods=["GET"])
+    def download_recording(recording_id):
+        """
+        Download a recording file.
+
+        Returns the video file as a streaming response.
+        """
+        storage = get_storage()
+
+        if not storage:
+            return jsonify({"error": "Storage not available"}), 503
+
+        recording = storage.get_recording(recording_id)
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
+
+        file_path = Path(recording.get("path", ""))
+        if not file_path.exists():
+            return jsonify({"error": "File not found on disk"}), 404
+
+        from flask import send_file
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=recording.get("filename", file_path.name),
+            mimetype="video/mp4"
+        )
+
     @api.route("/recordings/cleanup", methods=["POST"])
     def cleanup_recordings():
         """Delete all offloaded recordings."""

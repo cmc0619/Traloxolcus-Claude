@@ -173,7 +173,8 @@ class SoccerRigApp:
             self.coordinator = Coordinator(
                 self.config,
                 local_recorder=self.recorder,
-                local_sync=self.sync
+                local_sync=self.sync,
+                local_storage=self.storage
             )
             self.coordinator.start()
             logger.info("Coordinator initialized")

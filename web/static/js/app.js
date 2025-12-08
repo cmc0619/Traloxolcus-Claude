@@ -52,6 +52,11 @@ class SoccerRigApp {
             });
         });
 
+        // System control buttons
+        document.getElementById('reboot-all-btn')?.addEventListener('click', () => this.rebootAll());
+        document.getElementById('shutdown-all-btn')?.addEventListener('click', () => this.shutdownAll());
+        document.getElementById('cleanup-all-btn')?.addEventListener('click', () => this.cleanupOffloaded());
+
         // Recording tabs
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -510,6 +515,7 @@ class SoccerRigApp {
             }
 
             for (const rec of (recordings || [])) {
+                const recId = rec.id || rec.filename;
                 html += `
                     <div class="recording-item">
                         <div class="recording-header">
@@ -519,7 +525,11 @@ class SoccerRigApp {
                         <div class="recording-details">
                             <span>${rec.size_mb || 0} MB</span>
                             <span>${rec.duration_sec ? Math.floor(rec.duration_sec / 60) + ' min' : '--'}</span>
-                            <span>${rec.offloaded ? 'Offloaded' : 'Pending'}</span>
+                            <span class="${rec.offloaded ? 'success' : 'warning'}">${rec.offloaded ? 'Offloaded' : 'Pending'}</span>
+                        </div>
+                        <div class="recording-actions">
+                            <a class="btn btn-small btn-primary" href="${this.apiBase}/recordings/${encodeURIComponent(recId)}/download" download>Download</a>
+                            <button class="btn btn-small btn-danger" onclick="app.deleteRecording('${recId}')">Delete</button>
                         </div>
                     </div>
                 `;
@@ -531,6 +541,32 @@ class SoccerRigApp {
         }
 
         list.innerHTML = html;
+    }
+
+    async deleteRecording(recordingId) {
+        if (!confirm('Delete this recording permanently?')) return;
+
+        try {
+            await this.apiCall(`/recordings/${encodeURIComponent(recordingId)}`, 'DELETE');
+            this.showToast('Recording deleted', 'success');
+            await this.loadRecordings();
+        } catch (error) {
+            this.showToast(`Failed to delete: ${error.message}`, 'error');
+        }
+    }
+
+    async cleanupOffloaded() {
+        if (!confirm('Delete ALL offloaded recordings from this node? This frees up storage.')) return;
+
+        this.showToast('Cleaning up offloaded recordings...', 'info');
+
+        try {
+            const result = await this.apiCall('/recordings/cleanup', 'POST');
+            this.showToast(`Cleaned up ${result.deleted_count || 0} recordings, freed ${result.freed_mb || 0} MB`, 'success');
+            await this.loadRecordings();
+        } catch (error) {
+            this.showToast(`Cleanup failed: ${error.message}`, 'error');
+        }
     }
 
     // =========================================================================
@@ -624,6 +660,58 @@ class SoccerRigApp {
         } catch (error) {
             console.error('Failed to load settings:', error);
         }
+    }
+
+    async rebootAll() {
+        if (!confirm('Reboot ALL camera nodes? This will interrupt any active recording!')) return;
+
+        this.showToast('Sending reboot command to all nodes...', 'warning');
+
+        // Send reboot command to all peers
+        const peers = Object.values(this.cameras);
+        for (const cam of peers) {
+            try {
+                if (cam.is_local) {
+                    await this.apiCall('/reboot', 'POST');
+                } else if (cam.ip) {
+                    // Try to reach remote node
+                    await fetch(`http://${cam.ip}:${cam.port || 8080}/api/v1/reboot`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    }).catch(() => {});
+                }
+            } catch (e) {
+                console.error(`Failed to reboot ${cam.camera_id}:`, e);
+            }
+        }
+
+        this.showToast('Reboot commands sent - nodes will restart shortly', 'info');
+    }
+
+    async shutdownAll() {
+        if (!confirm('SHUTDOWN ALL camera nodes? You will need physical access to power them back on!')) return;
+        if (!confirm('Are you SURE? This will power off all cameras!')) return;
+
+        this.showToast('Sending shutdown command to all nodes...', 'warning');
+
+        const peers = Object.values(this.cameras);
+        for (const cam of peers) {
+            try {
+                if (cam.is_local) {
+                    await this.apiCall('/shutdown', 'POST', { force: true });
+                } else if (cam.ip) {
+                    await fetch(`http://${cam.ip}:${cam.port || 8080}/api/v1/shutdown`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ force: true })
+                    }).catch(() => {});
+                }
+            } catch (e) {
+                console.error(`Failed to shutdown ${cam.camera_id}:`, e);
+            }
+        }
+
+        this.showToast('Shutdown commands sent - nodes will power off shortly', 'info');
     }
 
     // =========================================================================

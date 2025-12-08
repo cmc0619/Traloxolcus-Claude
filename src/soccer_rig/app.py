@@ -24,6 +24,7 @@ from soccer_rig.sync import SyncManager
 from soccer_rig.audio import AudioFeedback
 from soccer_rig.network import NetworkManager
 from soccer_rig.updater import GitHubUpdater
+from soccer_rig.coordinator import Coordinator
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class SoccerRigApp:
         self.audio: Optional[AudioFeedback] = None
         self.network: Optional[NetworkManager] = None
         self.updater: Optional[GitHubUpdater] = None
+        self.coordinator: Optional[Coordinator] = None
         self.api_server: Optional[APIServer] = None
 
         self._running = False
@@ -99,6 +101,37 @@ class SoccerRigApp:
         self.shutdown()
         sys.exit(0)
 
+    def _setup_peer_discovery(self) -> None:
+        """Wire up network peer discovery to coordinator."""
+        if not self.network or not self.coordinator:
+            return
+
+        # Check for discovered peers periodically
+        import threading
+
+        def check_peers():
+            import time
+            while self._running:
+                try:
+                    peers = self.network.get_peers()
+                    for peer in peers:
+                        camera_id = peer.get("camera_id")
+                        ip = peer.get("ip")
+                        port = peer.get("port", 8080)
+                        position = peer.get("position", "")
+
+                        if camera_id and ip and camera_id != self.config.camera.id:
+                            self.coordinator.update_peer_from_discovery(
+                                camera_id, ip, port, position
+                            )
+                except Exception as e:
+                    logger.error(f"Peer discovery update error: {e}")
+
+                time.sleep(5)
+
+        self._peer_discovery_thread = threading.Thread(target=check_peers, daemon=True)
+        self._peer_discovery_thread.start()
+
     def initialize(self) -> bool:
         """
         Initialize all components.
@@ -135,6 +168,18 @@ class SoccerRigApp:
             # Initialize updater
             self.updater = GitHubUpdater(self.config)
             logger.info("Updater initialized")
+
+            # Initialize coordinator for multi-camera control
+            self.coordinator = Coordinator(
+                self.config,
+                local_recorder=self.recorder,
+                local_sync=self.sync
+            )
+            self.coordinator.start()
+            logger.info("Coordinator initialized")
+
+            # Wire up network discovery to coordinator
+            self._setup_peer_discovery()
 
             # Initialize API server
             self.api_server = APIServer(
@@ -206,6 +251,10 @@ class SoccerRigApp:
         # Cleanup camera
         if self.recorder:
             self.recorder.cleanup()
+
+        # Stop coordinator
+        if self.coordinator:
+            self.coordinator.stop()
 
         # Cleanup network
         if self.network:

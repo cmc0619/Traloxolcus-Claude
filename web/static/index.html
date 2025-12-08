@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Soccer Rig</title>
+    <title>Soccer Rig - Multi-Camera Control</title>
     <link rel="stylesheet" href="/css/style.css">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#1a1a2e">
@@ -16,12 +16,9 @@
         <header class="header">
             <div class="header-left">
                 <span class="logo">Soccer Rig</span>
-                <span class="version" id="version">v1.0.0</span>
+                <span class="status-badge" id="system-status">Initializing...</span>
             </div>
             <div class="header-right">
-                <span class="sync-status" id="sync-indicator" title="Time Sync">
-                    <span class="sync-dot"></span>
-                </span>
                 <button class="btn-icon" id="settings-btn" title="Settings">
                     <svg viewBox="0 0 24 24" width="24" height="24">
                         <path fill="currentColor" d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
@@ -30,73 +27,252 @@
             </div>
         </header>
 
+        <!-- Pre-flight Banner -->
+        <div class="preflight-banner" id="preflight-banner" style="display: none;">
+            <div class="preflight-content">
+                <span class="preflight-icon">⚠️</span>
+                <span class="preflight-text" id="preflight-text">Pre-flight check required</span>
+                <button class="btn btn-small btn-warning" id="run-preflight-btn">Run Check</button>
+            </div>
+        </div>
+
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Camera Cards -->
-            <div class="camera-grid" id="camera-grid">
-                <!-- Camera cards will be dynamically generated -->
+            <!-- System Summary -->
+            <div class="summary-bar" id="summary-bar">
+                <div class="summary-item">
+                    <span class="summary-label">Cameras</span>
+                    <span class="summary-value" id="cameras-online">0/3</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Sync</span>
+                    <span class="summary-value" id="sync-status">--</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Storage</span>
+                    <span class="summary-value" id="total-storage">-- GB</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Est. Time</span>
+                    <span class="summary-value" id="est-time">-- min</span>
+                </div>
             </div>
 
-            <!-- Recording Controls -->
+            <!-- Camera Grid - All 3 cameras -->
+            <div class="camera-grid" id="camera-grid">
+                <div class="camera-card" id="camera-CAM_L" data-camera="CAM_L">
+                    <div class="camera-header">
+                        <div class="camera-info">
+                            <span class="camera-id">CAM_L</span>
+                            <span class="camera-position">Left</span>
+                        </div>
+                        <div class="camera-status">
+                            <span class="status-dot offline"></span>
+                            <span class="status-text">Offline</span>
+                        </div>
+                    </div>
+                    <div class="camera-preview">
+                        <div class="preview-placeholder">Searching...</div>
+                    </div>
+                    <div class="camera-stats">
+                        <div class="stat-row">
+                            <span class="stat-label">Temp</span>
+                            <span class="stat-value" data-stat="temp">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Storage</span>
+                            <span class="stat-value" data-stat="storage">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Sync</span>
+                            <span class="stat-value" data-stat="sync">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="camera-card" id="camera-CAM_C" data-camera="CAM_C">
+                    <div class="camera-header">
+                        <div class="camera-info">
+                            <span class="camera-id">CAM_C</span>
+                            <span class="camera-position">Center</span>
+                            <span class="master-badge">MASTER</span>
+                        </div>
+                        <div class="camera-status">
+                            <span class="status-dot offline"></span>
+                            <span class="status-text">Offline</span>
+                        </div>
+                    </div>
+                    <div class="camera-preview">
+                        <div class="preview-placeholder">Searching...</div>
+                    </div>
+                    <div class="camera-stats">
+                        <div class="stat-row">
+                            <span class="stat-label">Temp</span>
+                            <span class="stat-value" data-stat="temp">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Storage</span>
+                            <span class="stat-value" data-stat="storage">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Sync</span>
+                            <span class="stat-value" data-stat="sync">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="camera-card" id="camera-CAM_R" data-camera="CAM_R">
+                    <div class="camera-header">
+                        <div class="camera-info">
+                            <span class="camera-id">CAM_R</span>
+                            <span class="camera-position">Right</span>
+                        </div>
+                        <div class="camera-status">
+                            <span class="status-dot offline"></span>
+                            <span class="status-text">Offline</span>
+                        </div>
+                    </div>
+                    <div class="camera-preview">
+                        <div class="preview-placeholder">Searching...</div>
+                    </div>
+                    <div class="camera-stats">
+                        <div class="stat-row">
+                            <span class="stat-label">Temp</span>
+                            <span class="stat-value" data-stat="temp">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Storage</span>
+                            <span class="stat-value" data-stat="storage">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Sync</span>
+                            <span class="stat-value" data-stat="sync">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recording Controls - Main Button -->
             <div class="control-panel">
-                <div class="session-info">
-                    <label>Session ID:</label>
-                    <input type="text" id="session-id" placeholder="Auto-generated">
+                <div class="session-row">
+                    <label>Session:</label>
+                    <input type="text" id="session-id" placeholder="Auto-generated on start">
                 </div>
-                <div class="control-buttons">
-                    <button class="btn btn-primary btn-large" id="start-all-btn">
-                        <svg viewBox="0 0 24 24" width="24" height="24">
-                            <circle cx="12" cy="12" r="10" fill="currentColor"/>
-                        </svg>
-                        Start All
-                    </button>
-                    <button class="btn btn-danger btn-large" id="stop-all-btn" disabled>
-                        <svg viewBox="0 0 24 24" width="24" height="24">
-                            <rect x="6" y="6" width="12" height="12" fill="currentColor"/>
-                        </svg>
-                        Stop All
-                    </button>
-                </div>
-                <div class="recording-timer" id="recording-timer" style="display: none;">
-                    <span class="timer-icon recording-dot"></span>
-                    <span class="timer-text" id="timer-text">00:00:00</span>
+
+                <!-- Big Record Button -->
+                <button class="record-button" id="record-btn">
+                    <div class="record-icon"></div>
+                    <span class="record-text">START RECORDING</span>
+                    <span class="record-subtext">All 3 Cameras</span>
+                </button>
+
+                <!-- Recording Timer (shown when recording) -->
+                <div class="recording-info" id="recording-info" style="display: none;">
+                    <div class="recording-timer">
+                        <span class="recording-dot"></span>
+                        <span class="timer-text" id="timer-text">00:00:00</span>
+                    </div>
+                    <div class="recording-session" id="recording-session"></div>
                 </div>
             </div>
 
             <!-- Quick Actions -->
-            <div class="quick-actions">
-                <button class="btn btn-secondary" id="test-btn">
-                    <svg viewBox="0 0 24 24" width="18" height="18">
-                        <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
-                    </svg>
-                    Test
+            <div class="action-grid">
+                <button class="action-btn" id="preflight-btn">
+                    <span class="action-icon">✓</span>
+                    <span class="action-label">Pre-flight Check</span>
                 </button>
-                <button class="btn btn-secondary" id="sync-btn">
-                    <svg viewBox="0 0 24 24" width="18" height="18">
-                        <path fill="currentColor" d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"/>
-                        <path fill="currentColor" d="M12,20V22A10,10 0 0,0 22,12H20A8,8 0 0,1 12,20Z"/>
-                    </svg>
-                    Sync
+                <button class="action-btn" id="sync-btn">
+                    <span class="action-icon">⟳</span>
+                    <span class="action-label">Sync Time</span>
                 </button>
-                <button class="btn btn-secondary" id="recordings-btn">
-                    <svg viewBox="0 0 24 24" width="18" height="18">
-                        <path fill="currentColor" d="M4,6H2V20A2,2 0 0,0 4,22H18V20H4V6M20,2H8A2,2 0 0,0 6,4V16A2,2 0 0,0 8,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H8V4H20V16Z"/>
-                    </svg>
-                    Files
+                <button class="action-btn" id="test-btn">
+                    <span class="action-icon">▶</span>
+                    <span class="action-label">Test Record</span>
+                </button>
+                <button class="action-btn" id="files-btn">
+                    <span class="action-icon">📁</span>
+                    <span class="action-label">Recordings</span>
                 </button>
             </div>
         </main>
+
+        <!-- Pre-flight Modal -->
+        <div class="modal" id="preflight-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Pre-flight Check</h2>
+                    <button class="btn-close" onclick="app.hideModal('preflight-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="preflight-status" id="preflight-status">
+                        <div class="preflight-overall" id="preflight-overall">
+                            <span class="preflight-result">Checking...</span>
+                        </div>
+                        <div class="preflight-cameras" id="preflight-cameras">
+                            <!-- Camera checks will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="app.hideModal('preflight-modal')">Close</button>
+                    <button class="btn btn-primary" id="rerun-preflight-btn">Run Again</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Peer Management Modal -->
+        <div class="modal" id="peers-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Camera Peers</h2>
+                    <button class="btn-close" onclick="app.hideModal('peers-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="peer-list" id="peer-list">
+                        <!-- Peers will be listed here -->
+                    </div>
+                    <div class="add-peer-form">
+                        <h3>Add Camera Manually</h3>
+                        <div class="form-row">
+                            <select id="add-peer-id">
+                                <option value="CAM_L">CAM_L (Left)</option>
+                                <option value="CAM_C">CAM_C (Center)</option>
+                                <option value="CAM_R">CAM_R (Right)</option>
+                            </select>
+                            <input type="text" id="add-peer-ip" placeholder="IP Address">
+                            <button class="btn btn-primary btn-small" id="add-peer-btn">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Settings Modal -->
         <div class="modal" id="settings-modal">
             <div class="modal-content">
                 <div class="modal-header">
                     <h2>Settings</h2>
-                    <button class="btn-close" id="close-settings">&times;</button>
+                    <button class="btn-close" onclick="app.hideModal('settings-modal')">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div class="settings-section">
-                        <h3>Recording</h3>
+                        <h3>This Node</h3>
+                        <div class="setting-row">
+                            <label>Camera ID</label>
+                            <span id="local-camera-id">--</span>
+                        </div>
+                        <div class="setting-row">
+                            <label>IP Address</label>
+                            <span id="local-ip">--</span>
+                        </div>
+                        <div class="setting-row">
+                            <label>Version</label>
+                            <span id="local-version">--</span>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Recording Settings</h3>
                         <div class="setting-row">
                             <label>Codec</label>
                             <select id="setting-codec">
@@ -105,52 +281,28 @@
                             </select>
                         </div>
                         <div class="setting-row">
-                            <label>Bitrate (Mbps)</label>
-                            <input type="number" id="setting-bitrate" min="15" max="50" value="30">
+                            <label>Bitrate</label>
+                            <select id="setting-bitrate">
+                                <option value="25">25 Mbps</option>
+                                <option value="30" selected>30 Mbps</option>
+                                <option value="35">35 Mbps</option>
+                            </select>
                         </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Network</h3>
                         <div class="setting-row">
-                            <label>Audio</label>
-                            <label class="switch">
-                                <input type="checkbox" id="setting-audio">
-                                <span class="slider"></span>
-                            </label>
+                            <label>Manage Peers</label>
+                            <button class="btn btn-small btn-secondary" id="manage-peers-btn">Configure</button>
                         </div>
                     </div>
                     <div class="settings-section">
                         <h3>System</h3>
                         <div class="setting-row">
-                            <label>Mode</label>
-                            <select id="setting-mode">
-                                <option value="production">Production</option>
-                                <option value="development">Development</option>
-                            </select>
-                        </div>
-                        <div class="setting-row">
-                            <label>Camera ID</label>
-                            <select id="setting-camera-id">
-                                <option value="CAM_L">CAM_L (Left)</option>
-                                <option value="CAM_C">CAM_C (Center)</option>
-                                <option value="CAM_R">CAM_R (Right)</option>
-                            </select>
+                            <button class="btn btn-warning" id="reboot-all-btn">Reboot All</button>
+                            <button class="btn btn-danger" id="shutdown-all-btn">Shutdown All</button>
                         </div>
                     </div>
-                    <div class="settings-section">
-                        <h3>Updates</h3>
-                        <div class="setting-row">
-                            <span id="current-version">Version: 1.0.0</span>
-                            <button class="btn btn-small" id="check-update-btn">Check Updates</button>
-                        </div>
-                    </div>
-                    <div class="settings-section">
-                        <h3>Actions</h3>
-                        <div class="action-buttons">
-                            <button class="btn btn-warning" id="reboot-btn">Reboot</button>
-                            <button class="btn btn-danger" id="shutdown-btn">Shutdown</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-primary" id="save-settings-btn">Save</button>
                 </div>
             </div>
         </div>
@@ -160,16 +312,22 @@
             <div class="modal-content modal-large">
                 <div class="modal-header">
                     <h2>Recordings</h2>
-                    <button class="btn-close" id="close-recordings">&times;</button>
+                    <button class="btn-close" onclick="app.hideModal('recordings-modal')">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <div class="recordings-toolbar">
-                        <button class="btn btn-small" id="refresh-recordings-btn">Refresh</button>
-                        <button class="btn btn-small btn-warning" id="cleanup-btn">Delete Offloaded</button>
+                    <div class="recordings-tabs">
+                        <button class="tab-btn active" data-camera="all">All</button>
+                        <button class="tab-btn" data-camera="CAM_L">CAM_L</button>
+                        <button class="tab-btn" data-camera="CAM_C">CAM_C</button>
+                        <button class="tab-btn" data-camera="CAM_R">CAM_R</button>
                     </div>
                     <div class="recordings-list" id="recordings-list">
-                        <!-- Recordings will be listed here -->
+                        <div class="loading">Loading...</div>
                     </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-warning" id="cleanup-all-btn">Delete Offloaded</button>
+                    <button class="btn btn-secondary" onclick="app.hideModal('recordings-modal')">Close</button>
                 </div>
             </div>
         </div>

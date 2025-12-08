@@ -48,6 +48,197 @@ def create_api_blueprint(app_context):
     def get_network():
         return app_context.network
 
+    def get_coordinator():
+        return app_context.coordinator
+
+    # =========================================================================
+    # Coordinator Endpoints (Multi-Camera Control)
+    # =========================================================================
+
+    @api.route("/coordinator/status", methods=["GET"])
+    def get_coordinator_status():
+        """
+        Get aggregated status from all cameras.
+
+        Returns combined dashboard view with all camera statuses.
+        """
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        return jsonify(coordinator.get_aggregated_status())
+
+    @api.route("/coordinator/peers", methods=["GET"])
+    def get_coordinator_peers():
+        """Get list of all camera peers."""
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        return jsonify({"peers": coordinator.get_peers()})
+
+    @api.route("/coordinator/peers", methods=["POST"])
+    def add_coordinator_peer():
+        """
+        Manually add a peer camera.
+
+        Request body:
+        {
+            "camera_id": "CAM_L",
+            "ip": "192.168.1.100",
+            "port": 8080
+        }
+        """
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body required"}), 400
+
+        if "camera_id" not in data or "ip" not in data:
+            return jsonify({"error": "camera_id and ip required"}), 400
+
+        result = coordinator.add_peer(
+            camera_id=data["camera_id"],
+            ip=data["ip"],
+            port=data.get("port", 8080),
+            manual=True
+        )
+
+        return jsonify(result)
+
+    @api.route("/coordinator/peers/<camera_id>", methods=["DELETE"])
+    def remove_coordinator_peer(camera_id):
+        """Remove a peer camera."""
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        result = coordinator.remove_peer(camera_id)
+        return jsonify(result)
+
+    @api.route("/coordinator/start", methods=["POST"])
+    def coordinator_start_all():
+        """
+        Start recording on ALL cameras with synchronized timing.
+
+        Request body (optional):
+        {
+            "session_id": "string"
+        }
+        """
+        coordinator = get_coordinator()
+        audio = get_audio()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+
+        result = coordinator.start_all(session_id)
+
+        if result.get("success") and audio:
+            audio.beep_start()
+
+        status_code = 200 if result.get("success") else 500
+        return jsonify(result), status_code
+
+    @api.route("/coordinator/stop", methods=["POST"])
+    def coordinator_stop_all():
+        """Stop recording on ALL cameras."""
+        coordinator = get_coordinator()
+        audio = get_audio()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        result = coordinator.stop_all()
+
+        if result.get("success") and audio:
+            audio.beep_stop()
+
+        status_code = 200 if result.get("success") else 500
+        return jsonify(result), status_code
+
+    @api.route("/coordinator/preflight", methods=["POST"])
+    def coordinator_preflight():
+        """
+        Run pre-flight checks on all cameras.
+
+        Verifies all systems ready for recording.
+        """
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        result = coordinator.run_preflight_check()
+        status_code = 200 if result.get("passed") else 500
+        return jsonify(result), status_code
+
+    @api.route("/coordinator/session", methods=["GET"])
+    def get_current_session():
+        """Get current recording session info."""
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        session = coordinator.get_current_session()
+        if session:
+            return jsonify(session)
+        return jsonify({"session": None, "status": "idle"})
+
+    @api.route("/coordinator/sessions", methods=["GET"])
+    def get_session_history():
+        """Get recording session history."""
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        return jsonify({"sessions": coordinator.get_session_history()})
+
+    @api.route("/coordinator/recordings", methods=["GET"])
+    def get_all_recordings():
+        """Get recordings from all cameras."""
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        return jsonify(coordinator.get_all_recordings())
+
+    @api.route("/coordinator/sync", methods=["POST"])
+    def coordinator_sync_all():
+        """Trigger time sync on all cameras."""
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        result = coordinator.trigger_sync_all()
+        return jsonify(result)
+
+    @api.route("/coordinator/test", methods=["POST"])
+    def coordinator_test_all():
+        """Run test recording on all cameras."""
+        coordinator = get_coordinator()
+
+        if not coordinator:
+            return jsonify({"error": "Coordinator not available"}), 503
+
+        result = coordinator.run_test_all()
+        status_code = 200 if result.get("all_passed") else 500
+        return jsonify(result), status_code
+
     # =========================================================================
     # Status Endpoints
     # =========================================================================

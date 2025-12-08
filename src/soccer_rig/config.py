@@ -83,6 +83,18 @@ class AudioConfig:
 
 
 @dataclass
+class OffloadConfig:
+    """Offload/upload configuration."""
+    server_url: str = ""  # e.g., "http://192.168.1.200:8081"
+    auto_upload: bool = False
+    upload_on_record_stop: bool = False
+    retry_count: int = 5
+    retry_delay_sec: int = 5
+    chunk_size_kb: int = 1024
+    verify_checksum: bool = True
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     camera: CameraConfig = field(default_factory=CameraConfig)
@@ -91,6 +103,7 @@ class Config:
     sync: SyncConfig = field(default_factory=SyncConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
+    offload: OffloadConfig = field(default_factory=OffloadConfig)
     production_mode: bool = True
 
     @classmethod
@@ -135,6 +148,8 @@ class Config:
             config.update = cls._load_dataclass(UpdateConfig, data["update"])
         if "audio" in data:
             config.audio = cls._load_dataclass(AudioConfig, data["audio"])
+        if "offload" in data:
+            config.offload = cls._load_dataclass(OffloadConfig, data["offload"])
         if "production_mode" in data:
             config.production_mode = data["production_mode"]
 
@@ -163,6 +178,7 @@ class Config:
             "sync": self._dataclass_to_dict(self.sync),
             "update": self._dataclass_to_dict(self.update),
             "audio": self._dataclass_to_dict(self.audio),
+            "offload": self._dataclass_to_dict(self.offload),
             "production_mode": self.production_mode,
         }
 
@@ -185,6 +201,7 @@ class Config:
             "sync": self._dataclass_to_dict(self.sync),
             "update": self._dataclass_to_dict(self.update),
             "audio": self._dataclass_to_dict(self.audio),
+            "offload": self._dataclass_to_dict(self.offload),
             "production_mode": self.production_mode,
         }
 
@@ -214,5 +231,9 @@ class Config:
             for k, v in data["audio"].items():
                 if hasattr(self.audio, k):
                     setattr(self.audio, k, v)
+        if "offload" in data:
+            for k, v in data["offload"].items():
+                if hasattr(self.offload, k):
+                    setattr(self.offload, k, v)
         if "production_mode" in data:
             self.production_mode = data["production_mode"]

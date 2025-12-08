@@ -901,6 +901,140 @@ def create_api_blueprint(app_context):
         })
 
     # =========================================================================
+    # Offload Endpoints
+    # =========================================================================
+
+    def get_offload():
+        return getattr(app_context, 'offload', None)
+
+    @api.route("/offload/status", methods=["GET"])
+    def get_offload_status():
+        """Get offload client status."""
+        offload = get_offload()
+
+        if not offload:
+            return jsonify({
+                "enabled": False,
+                "message": "Offload client not available"
+            })
+
+        return jsonify(offload.get_status())
+
+    @api.route("/offload/upload", methods=["POST"])
+    def trigger_upload():
+        """
+        Manually trigger upload of a recording.
+
+        Body:
+            session_id: Session ID
+            camera_id: Camera ID (optional, defaults to local)
+        """
+        offload = get_offload()
+        storage = get_storage()
+
+        if not offload:
+            return jsonify({"error": "Offload client not available"}), 503
+
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+        camera_id = data.get("camera_id", app_context.config.camera.id)
+
+        if not session_id:
+            return jsonify({"error": "session_id required"}), 400
+
+        # Find recording
+        recording = storage.get_recording_by_session(session_id, camera_id)
+        if not recording:
+            return jsonify({"error": "Recording not found"}), 404
+
+        file_path = Path(recording.get("path", ""))
+        manifest_path = file_path.with_suffix(".json")
+
+        if not file_path.exists():
+            return jsonify({"error": "Recording file not found"}), 404
+
+        # Queue upload
+        job_id = offload.queue_upload(
+            recording_id=f"{session_id}_{camera_id}",
+            session_id=session_id,
+            camera_id=camera_id,
+            file_path=file_path,
+            manifest_path=manifest_path,
+        )
+
+        return jsonify({
+            "success": True,
+            "job_id": job_id,
+            "message": "Upload queued"
+        }), 202
+
+    @api.route("/offload/upload/all", methods=["POST"])
+    def upload_all_pending():
+        """Upload all recordings not yet offloaded."""
+        offload = get_offload()
+        storage = get_storage()
+
+        if not offload:
+            return jsonify({"error": "Offload client not available"}), 503
+
+        # Get all non-offloaded recordings
+        recordings = storage.list_recordings(filters={"offloaded": False})
+        queued = 0
+
+        for rec in recordings:
+            file_path = Path(rec.get("path", ""))
+            manifest_path = file_path.with_suffix(".json")
+
+            if file_path.exists():
+                offload.queue_upload(
+                    recording_id=rec.get("id", file_path.stem),
+                    session_id=rec.get("session_id", "unknown"),
+                    camera_id=app_context.config.camera.id,
+                    file_path=file_path,
+                    manifest_path=manifest_path,
+                )
+                queued += 1
+
+        return jsonify({
+            "success": True,
+            "queued_count": queued,
+            "message": f"Queued {queued} recordings for upload"
+        })
+
+    @api.route("/offload/jobs", methods=["GET"])
+    def list_offload_jobs():
+        """List all offload jobs."""
+        offload = get_offload()
+
+        if not offload:
+            return jsonify({"error": "Offload client not available"}), 503
+
+        return jsonify({"jobs": offload.get_all_jobs()})
+
+    @api.route("/offload/jobs/<job_id>", methods=["GET"])
+    def get_offload_job(job_id):
+        """Get status of a specific offload job."""
+        offload = get_offload()
+
+        if not offload:
+            return jsonify({"error": "Offload client not available"}), 503
+
+        job = offload.get_job_status(job_id)
+        if job:
+            return jsonify(job)
+        return jsonify({"error": "Job not found"}), 404
+
+    @api.route("/offload/server/health", methods=["GET"])
+    def check_offload_server():
+        """Check if the offload server is reachable."""
+        offload = get_offload()
+
+        if not offload:
+            return jsonify({"error": "Offload client not available"}), 503
+
+        return jsonify(offload.check_server_health())
+
+    # =========================================================================
     # Helper Functions
     # =========================================================================
 

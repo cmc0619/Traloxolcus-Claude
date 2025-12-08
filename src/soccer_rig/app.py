@@ -26,6 +26,7 @@ from soccer_rig.audio import AudioFeedback
 from soccer_rig.network import NetworkManager
 from soccer_rig.updater import GitHubUpdater
 from soccer_rig.coordinator import Coordinator
+from soccer_rig.offload import OffloadClient
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class SoccerRigApp:
         self.coordinator: Optional[Coordinator] = None
         self.framing: Optional[FramingDetector] = None
         self.framing_assistant: Optional[FramingAssistant] = None
+        self.offload: Optional[OffloadClient] = None
         self.api_server: Optional[APIServer] = None
 
         self._running = False
@@ -200,6 +202,17 @@ class SoccerRigApp:
             # Wire up network discovery to coordinator
             self._setup_peer_discovery()
 
+            # Initialize offload client for server uploads
+            try:
+                self.offload = OffloadClient(
+                    self.config,
+                    storage_manager=self.storage
+                )
+                logger.info("Offload client initialized")
+            except Exception as e:
+                logger.warning(f"Offload client unavailable: {e}")
+                self.offload = None
+
             # Initialize API server
             self.api_server = APIServer(
                 self,
@@ -274,6 +287,10 @@ class SoccerRigApp:
         # Stop coordinator
         if self.coordinator:
             self.coordinator.stop()
+
+        # Stop offload client
+        if self.offload:
+            self.offload.stop()
 
         # Cleanup network
         if self.network:

@@ -323,6 +323,10 @@ body {
     color: var(--danger);
 }
 
+.stat-value.success {
+    color: var(--success);
+}
+
 /* Control Panel */
 .control-panel {
     background: var(--bg-card);
@@ -488,6 +492,16 @@ body {
 
 .action-btn:active {
     transform: scale(0.98);
+}
+
+.action-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+.action-btn.active .action-label {
+    color: rgba(255, 255, 255, 0.8);
 }
 
 .action-icon {

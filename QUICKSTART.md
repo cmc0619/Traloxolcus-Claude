@@ -98,6 +98,17 @@ Configure CAM_C as an access point:
    - Adjust tripods until field is fully visible
    - CAM_L covers left third, CAM_C covers center, CAM_R covers right third
 
+6. **Use framing assistance** (optional)
+   - Tap "Framing Assist" button to enable audio feedback
+   - Camera will beep when field is detected
+   - Two beeps = good framing achieved
+   - Rising tone = framing confirmed (held for 2 seconds)
+   - The "Framing" indicator on each camera card shows:
+     - **Excellent**: Field and lines clearly visible
+     - **Good**: Field visible with some lines
+     - **Partial**: Some field visible, adjust camera
+     - **No Field**: Point camera at the soccer field
+
 ### Starting Recording
 
 1. **Enter session name** (optional)

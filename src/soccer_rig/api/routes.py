@@ -51,6 +51,9 @@ def create_api_blueprint(app_context):
     def get_coordinator():
         return app_context.coordinator
 
+    def get_framing():
+        return getattr(app_context, 'framing', None)
+
     # =========================================================================
     # Coordinator Endpoints (Multi-Camera Control)
     # =========================================================================
@@ -728,6 +731,100 @@ def create_api_blueprint(app_context):
 
         result = sync.force_sync()
         return jsonify(result)
+
+    # =========================================================================
+    # Framing Assistance Endpoints
+    # =========================================================================
+
+    @api.route("/framing/status", methods=["GET"])
+    def get_framing_status():
+        """
+        Get current framing detection status.
+
+        Returns field detection and framing quality info.
+        """
+        framing = get_framing()
+
+        if not framing:
+            return jsonify({
+                "available": False,
+                "message": "Framing detection not available"
+            })
+
+        return jsonify({
+            "available": True,
+            **framing.get_status()
+        })
+
+    @api.route("/framing/assist/start", methods=["POST"])
+    def start_framing_assist():
+        """
+        Start framing assistance with audio feedback.
+
+        Provides beep cues when field is properly framed.
+        """
+        framing = get_framing()
+        recorder = get_recorder()
+
+        if not framing:
+            return jsonify({"error": "Framing detection not available"}), 503
+
+        if hasattr(framing, 'assistant') and framing.assistant:
+            # Get frame source from recorder
+            frame_source = None
+            if recorder and hasattr(recorder, 'get_current_frame'):
+                frame_source = recorder.get_current_frame
+
+            framing.assistant.start(frame_source)
+            return jsonify({
+                "success": True,
+                "message": "Framing assistance started"
+            })
+
+        return jsonify({"error": "Framing assistant not available"}), 503
+
+    @api.route("/framing/assist/stop", methods=["POST"])
+    def stop_framing_assist():
+        """Stop framing assistance."""
+        framing = get_framing()
+
+        if not framing:
+            return jsonify({"error": "Framing detection not available"}), 503
+
+        if hasattr(framing, 'assistant') and framing.assistant:
+            framing.assistant.stop()
+            return jsonify({
+                "success": True,
+                "message": "Framing assistance stopped"
+            })
+
+        return jsonify({"error": "Framing assistant not available"}), 503
+
+    @api.route("/framing/check", methods=["POST"])
+    def check_framing():
+        """
+        Run a one-time framing check.
+
+        Takes a snapshot and analyzes field framing.
+        """
+        framing = get_framing()
+        recorder = get_recorder()
+
+        if not framing:
+            return jsonify({"error": "Framing detection not available"}), 503
+
+        # Get current frame
+        frame = None
+        if recorder and hasattr(recorder, 'get_current_frame'):
+            frame = recorder.get_current_frame()
+
+        if frame is None:
+            return jsonify({
+                "error": "Could not capture frame for analysis"
+            }), 500
+
+        result = framing.analyze_frame(frame)
+        return jsonify(result.to_dict())
 
     # =========================================================================
     # Network Endpoints

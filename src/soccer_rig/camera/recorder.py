@@ -421,6 +421,35 @@ class CameraRecorder:
             logger.error(f"Failed to capture snapshot: {e}")
             return None
 
+    def get_current_frame(self):
+        """
+        Get current camera frame as numpy array.
+
+        Used by framing detection for real-time analysis.
+
+        Returns:
+            numpy array (BGR format) or None if not available
+        """
+        if not PICAMERA_AVAILABLE or not self.camera:
+            return None
+
+        try:
+            # Capture frame to numpy array
+            frame = self.camera.capture_array()
+
+            # picamera2 returns RGB, convert to BGR for OpenCV compatibility
+            try:
+                import cv2
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            except ImportError:
+                pass  # Return RGB if cv2 not available
+
+            return frame
+
+        except Exception as e:
+            logger.error(f"Failed to get current frame: {e}")
+            return None
+
     def run_test_recording(self) -> Dict[str, Any]:
         """
         Run a short test recording to verify system.

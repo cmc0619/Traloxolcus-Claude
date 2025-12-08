@@ -203,6 +203,53 @@ class AudioFeedback:
         """Play temperature warning."""
         self.beep(frequency=600, duration_ms=200, count=3, gap_ms=150)
 
+    def beep_custom(
+        self,
+        frequency: float = 800,
+        duration: float = 0.2,
+        count: int = 1
+    ) -> None:
+        """
+        Play a custom beep (convenience wrapper).
+
+        Args:
+            frequency: Tone frequency in Hz
+            duration: Duration in seconds
+            count: Number of beeps
+        """
+        self.beep(
+            frequency=frequency,
+            duration_ms=int(duration * 1000),
+            count=count,
+            gap_ms=100
+        )
+
+    def beep_framing_detected(self) -> None:
+        """Play field detected beep."""
+        self.beep(frequency=600, duration_ms=100)
+
+    def beep_framing_good(self) -> None:
+        """Play good framing beep (two quick tones)."""
+        self.beep(frequency=800, duration_ms=100, count=2, gap_ms=80)
+
+    def beep_framing_lost(self) -> None:
+        """Play framing lost beep."""
+        self.beep(frequency=400, duration_ms=200)
+
+    def beep_framing_confirmed(self) -> None:
+        """Play framing confirmed beep (rising tones)."""
+        if not self._enabled:
+            return
+
+        def play():
+            for freq in [600, 800, 1000]:
+                audio = self._generate_tone(freq, 100)
+                self._play_audio(audio)
+                time.sleep(0.12)
+
+        thread = threading.Thread(target=play, daemon=True)
+        thread.start()
+
     def play_startup_sound(self) -> None:
         """Play startup sound."""
         if not self._enabled:

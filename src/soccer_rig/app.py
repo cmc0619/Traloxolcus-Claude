@@ -18,6 +18,7 @@ from typing import Optional
 
 from soccer_rig.config import Config
 from soccer_rig.camera import CameraRecorder, PreviewServer
+from soccer_rig.camera.framing import FramingDetector, FramingAssistant
 from soccer_rig.api import APIServer
 from soccer_rig.storage import StorageManager
 from soccer_rig.sync import SyncManager
@@ -61,6 +62,8 @@ class SoccerRigApp:
         self.network: Optional[NetworkManager] = None
         self.updater: Optional[GitHubUpdater] = None
         self.coordinator: Optional[Coordinator] = None
+        self.framing: Optional[FramingDetector] = None
+        self.framing_assistant: Optional[FramingAssistant] = None
         self.api_server: Optional[APIServer] = None
 
         self._running = False
@@ -164,6 +167,21 @@ class SoccerRigApp:
             # Initialize preview server
             self.preview = PreviewServer(self.recorder)
             logger.info("Preview server initialized")
+
+            # Initialize framing detection (for field positioning assistance)
+            try:
+                self.framing = FramingDetector(self.config)
+                self.framing_assistant = FramingAssistant(
+                    self.framing,
+                    audio_feedback=self.audio
+                )
+                # Store assistant reference on detector for API access
+                self.framing.assistant = self.framing_assistant
+                logger.info("Framing detection initialized")
+            except Exception as e:
+                logger.warning(f"Framing detection unavailable: {e}")
+                self.framing = None
+                self.framing_assistant = None
 
             # Initialize updater
             self.updater = GitHubUpdater(self.config)

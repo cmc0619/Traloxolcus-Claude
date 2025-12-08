@@ -14,6 +14,7 @@ class SoccerRigApp {
         this.currentSession = null;
         this.cameras = {};
         this.preflightPassed = false;
+        this.framingAssistActive = false;
 
         this.init();
     }
@@ -30,6 +31,7 @@ class SoccerRigApp {
 
         // Action buttons
         document.getElementById('preflight-btn').addEventListener('click', () => this.runPreflight());
+        document.getElementById('framing-btn').addEventListener('click', () => this.toggleFramingAssist());
         document.getElementById('sync-btn').addEventListener('click', () => this.syncAll());
         document.getElementById('test-btn').addEventListener('click', () => this.testAll());
         document.getElementById('files-btn').addEventListener('click', () => this.showRecordings());
@@ -196,6 +198,39 @@ class SoccerRigApp {
             const offset = sync.offset_ms || 0;
             syncEl.textContent = `${offset.toFixed(1)}ms`;
             syncEl.className = 'stat-value' + (Math.abs(offset) > 5 ? ' warning' : '');
+        }
+
+        // Update framing status
+        const framingEl = card.querySelector('[data-stat="framing"]');
+        if (framingEl) {
+            const framing = cam.framing || {};
+            const status = framing.status || 'unknown';
+            let displayText = '--';
+            let className = 'stat-value';
+
+            switch (status) {
+                case 'excellent':
+                    displayText = 'Excellent';
+                    className = 'stat-value success';
+                    break;
+                case 'good':
+                    displayText = 'Good';
+                    className = 'stat-value success';
+                    break;
+                case 'partial':
+                    displayText = 'Partial';
+                    className = 'stat-value warning';
+                    break;
+                case 'no_field':
+                    displayText = 'No Field';
+                    className = 'stat-value danger';
+                    break;
+                default:
+                    displayText = '--';
+            }
+
+            framingEl.textContent = displayText;
+            framingEl.className = className;
         }
 
         // Update preview if camera has IP
@@ -468,6 +503,61 @@ class SoccerRigApp {
             }
         } catch (error) {
             this.showToast(`Test failed: ${error.message}`, 'error');
+        }
+    }
+
+    // =========================================================================
+    // Framing Assistance
+    // =========================================================================
+
+    async toggleFramingAssist() {
+        const btn = document.getElementById('framing-btn');
+
+        if (this.framingAssistActive) {
+            // Stop framing assistance
+            try {
+                await this.apiCall('/framing/assist/stop', 'POST');
+                this.framingAssistActive = false;
+                btn.classList.remove('active');
+                this.showToast('Framing assistance stopped', 'info');
+            } catch (error) {
+                this.showToast(`Failed to stop: ${error.message}`, 'error');
+            }
+        } else {
+            // Start framing assistance
+            try {
+                const result = await this.apiCall('/framing/assist/start', 'POST');
+                if (result.success) {
+                    this.framingAssistActive = true;
+                    btn.classList.add('active');
+                    this.showToast('Framing assistance started - listen for audio cues', 'success');
+                } else {
+                    this.showToast(result.error || 'Failed to start framing assist', 'error');
+                }
+            } catch (error) {
+                this.showToast(`Framing assist unavailable: ${error.message}`, 'warning');
+            }
+        }
+    }
+
+    async checkFraming() {
+        try {
+            const result = await this.apiCall('/framing/check', 'POST');
+            const status = result.status || 'unknown';
+            const message = result.message || '';
+
+            if (status === 'good' || status === 'excellent') {
+                this.showToast(`Framing: ${message}`, 'success');
+            } else if (status === 'partial') {
+                this.showToast(`Framing: ${message}`, 'warning');
+            } else {
+                this.showToast(`Framing: ${message}`, 'error');
+            }
+
+            return result;
+        } catch (error) {
+            this.showToast(`Framing check failed: ${error.message}`, 'error');
+            return null;
         }
     }
 

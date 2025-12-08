@@ -25,6 +25,10 @@ zeroconf>=0.131.0
 # Audio
 simpleaudio>=1.0.4
 
+# Computer Vision (for framing detection)
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
 # Hashing/Checksums
 hashlib-compat>=1.0.0; python_version < "3.11"
 

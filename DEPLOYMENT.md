@@ -232,7 +232,7 @@ ml:
 push:
   enabled: true
   method: "api"
-  viewer_server_url: "https://your-domain.com"
+  viewer_server_url: "https://your-domain.com"  # or http://your-server-ip for no SSL
   api_key: "your-secure-api-key"
 ```
 
@@ -273,7 +273,7 @@ sudo journalctl -u processing-server -f
 ### Requirements
 - VPS with 2+ CPU cores, 4GB+ RAM
 - 500GB+ storage for videos
-- Domain name with SSL certificate
+- Domain name (for SSL) or static IP
 
 ### Software Setup
 
@@ -359,10 +359,11 @@ server {
 EOF
 
 sudo ln -s /etc/nginx/sites-available/soccer-rig /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default  # Remove default site
 sudo nginx -t
 sudo systemctl reload nginx
 
-# SSL certificate
+# SSL certificate (recommended for production)
 sudo certbot --nginx -d your-domain.com
 ```
 
@@ -473,7 +474,7 @@ soccer-rig offload --session GAME_20240315_140000
 curl http://192.168.1.100:5100/api/sessions/GAME_20240315_140000/status
 
 # 4. Once complete, video available at:
-# https://your-domain.com/watch
+# http://your-server-ip/watch
 ```
 
 ---
@@ -494,7 +495,7 @@ _team_codes = {
 
 ### End User Instructions
 
-1. Go to `https://your-domain.com/watch`
+1. Go to `http://your-server-ip/watch`
 2. Enter team code (e.g., `TIGERS24`)
 3. Select game from list
 4. Features available:
@@ -579,6 +580,6 @@ rsync -av /var/soccer-rig/videos/ /mnt/backup/
 |-----------|------|-----|
 | Pi Nodes | - | SSH: `pi@cam-*.local` |
 | Processing Server | 5100 | `http://192.168.1.100:5100` |
-| Viewer Server | 443 | `https://your-domain.com` |
-| Viewer Portal | 443 | `https://your-domain.com/watch` |
-| Admin Dashboard | 443 | `https://your-domain.com/admin` |
+| Viewer Server | 80/443 | `https://your-domain.com` |
+| Viewer Portal | 80/443 | `https://your-domain.com/watch` |
+| Admin Dashboard | 80/443 | `https://your-domain.com/admin` |

@@ -1,131 +1,208 @@
-# Soccer Rig - Multi-Camera Pi 5 Recording System
+# Soccer Rig - Multi-Camera Recording & Analysis System
 
-A three-camera synchronized 4K recording system for soccer matches using Raspberry Pi 5 nodes.
+A complete system for recording, processing, and viewing soccer matches with AI-powered event detection.
 
-## Overview
+## System Architecture
 
-This system consists of three independent Pi-Cam nodes (CAM_L, CAM_C, CAM_R) that:
-- Capture synchronized 4K footage at 30fps using H.265 codec
-- Serve a phone-accessible UI via WiFi mesh
-- Store video to NVMe storage
-- Provide status, health, and framing assistance
-- Export recordings for downstream stitching and ML processing
-
-## Hardware Requirements (Per Node)
-
-- Raspberry Pi 5 (8GB recommended)
-- Arducam 64MP Autofocus (IMX686)
-- NVMe SSD (512GB minimum)
-- Pi 5 NVMe carrier
-- Tripod + adjustable camera mount
-- USB-C battery bank or field battery pack
-- Small speaker/buzzer
-
-## Installation
-
-### 1. System Dependencies
-
-```bash
-sudo apt update
-sudo apt install -y python3-pip python3-venv python3-picamera2 \
-    ffmpeg chrony libcap-dev python3-prctl
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           SOCCER FIELD                                   │
+│                                                                          │
+│     ┌─────────┐       ┌─────────┐       ┌─────────┐                    │
+│     │  Pi 5   │       │  Pi 5   │       │  Pi 5   │                    │
+│     │  CAM_L  │       │  CAM_C  │       │  CAM_R  │                    │
+│     └────┬────┘       └────┬────┘       └────┬────┘                    │
+└──────────┼─────────────────┼─────────────────┼──────────────────────────┘
+           │                 │                 │
+           └────────────┬────┴────┬────────────┘
+                        │         │
+                        ▼         ▼
+              ┌─────────────────────────┐
+              │   PROCESSING SERVER     │
+              │   (Home, GPU)           │
+              │                         │
+              │   • Receive uploads     │
+              │   • Stitch panorama     │
+              │   • ML event detection  │
+              │   • Push to viewer      │
+              └───────────┬─────────────┘
+                          │
+                          ▼
+              ┌─────────────────────────┐
+              │    VIEWER SERVER        │
+              │    (VPS/Cloud)          │
+              │                         │
+              │   • Video streaming     │
+              │   • Natural language    │
+              │     search              │
+              │   • Clip generation     │
+              │   • User portal         │
+              └───────────┬─────────────┘
+                          │
+                          ▼
+              ┌─────────────────────────┐
+              │      END USERS          │
+              │                         │
+              │  Parents • Coaches      │
+              │  Players • Scouts       │
+              └─────────────────────────┘
 ```
 
-### 2. Install Soccer Rig
+## Components
+
+| Component | Description | Location |
+|-----------|-------------|----------|
+| **Pi Camera Nodes** | 3x Raspberry Pi 5 with 4K cameras | `src/soccer_rig/` |
+| **Processing Server** | GPU-accelerated stitching + ML | `processing-server/` |
+| **Viewer Server** | Web portal for end users | `soccer-rig-server/` |
+
+## Features
+
+### Recording (Pi Nodes)
+- 4K @ 30fps synchronized recording
+- H.265 hardware encoding
+- Auto field framing with audio feedback
+- NTP time sync across cameras
+- Auto-upload to processing server
+
+### Processing (GPU Server)
+- Panorama stitching (3 cameras → 5760x1080)
+- YOLO-based player/ball detection
+- Event detection: goals, saves, shots, passes, dribbles
+- Goalkeeper-specific tracking
+
+### Viewing (Web Portal)
+- Team code authentication
+- Natural language search ("show me all saves")
+- Click-to-seek event timeline
+- Clip creation and sharing
+- Player highlight generation
+
+## Quick Start
+
+### 1. Pi Camera Nodes
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_ORG/soccer-rig.git
-cd soccer-rig
-
-# Run installation script
+# On each Raspberry Pi 5
+git clone https://github.com/cmc0619/Traloxolcus-Claude.git
+cd Traloxolcus-Claude
 sudo ./install.sh
-```
 
-### 3. Configure the Node
+# Configure camera ID (CAM_L, CAM_C, or CAM_R)
+sudo nano /etc/soccer-rig/config.yaml
 
-Edit `/etc/soccer-rig/config.yaml`:
-
-```yaml
-camera:
-  id: CAM_C  # CAM_L, CAM_C, or CAM_R
-  position: center  # left, center, or right
-
-network:
-  mesh_ssid: SOCCER_MESH
-  mesh_password: your_secure_password
-```
-
-### 4. Start Services
-
-```bash
+# Start service
 sudo systemctl enable soccer-rig
 sudo systemctl start soccer-rig
 ```
 
-## Web UI
+### 2. Processing Server
 
-Access the web interface at `http://<pi-ip>:8080`
+```bash
+# On GPU server (NVIDIA required)
+cd Traloxolcus-Claude/processing-server
+python3 -m venv venv && source venv/bin/activate
+pip install -e ".[gpu]"
 
-Features:
-- Live camera preview
-- Start/Stop recording (all nodes or individual)
-- View recording status and health metrics
-- Configure camera settings
-- Download recordings
-- System updates
+# Configure
+cp config/processing.example.yaml config/processing.yaml
+nano config/processing.yaml
 
-## REST API
-
-Base path: `/api/v1`
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/status` | GET | Get node status |
-| `/record/start` | POST | Start recording |
-| `/record/stop` | POST | Stop recording |
-| `/recordings` | GET | List recordings |
-| `/recordings/confirm` | POST | Confirm offload |
-| `/config` | GET/POST | Get/Set configuration |
-| `/shutdown` | POST | Shutdown node |
-| `/selftest` | POST | Run self-test |
-| `/update/check` | POST | Check for updates |
-| `/update/apply` | POST | Apply update |
-
-## Field Deployment
-
-```
-        [Goal]
-          |
-  CAM_L --+-- CAM_C --+-- CAM_R
-          |           |
-     [Sideline]  [Sideline]
+# Run
+python -m processing_server.app
 ```
 
-- CAM_L: Left sideline corner
-- CAM_C: Midfield (NTP master)
-- CAM_R: Right sideline corner
-- Mount height: 6-12 ft
-- Slight downward tilt with overlapping coverage
+### 3. Viewer Server
 
-## Time Synchronization
+```bash
+# On VPS/cloud server
+cd Traloxolcus-Claude/soccer-rig-server
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
 
-CAM_C acts as the NTP master. CAM_L and CAM_R sync to CAM_C.
-Maximum allowed drift: 5ms
+# Configure database
+sudo -u postgres createdb soccer_rig
 
-## Recording Specifications
+# Run
+python -m soccer_server.app
+```
 
-- Resolution: 3840x2160 (4K)
-- Frame Rate: 30 fps
-- Codec: H.265 (fallback: H.264)
-- Bitrate: 25-35 Mbps
-- Container: MP4
-- Duration: 110+ minutes continuous
+## Documentation
+
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Complete deployment guide
+- **[QUICKSTART.md](QUICKSTART.md)** - Field operations guide
+- **[PROTOCOL.md](PROTOCOL.md)** - API and data formats
+- **[processing-server/README.md](processing-server/README.md)** - Processing server docs
+- **[soccer-rig-server/README.md](soccer-rig-server/README.md)** - Viewer server docs
+
+## Hardware Requirements
+
+### Per Camera Node
+- Raspberry Pi 5 (4GB+ RAM)
+- Pi Camera Module 3 or HQ Camera
+- 128GB+ microSD (A2 rated)
+- USB-C power supply (5V 5A)
+
+### Processing Server
+- NVIDIA GPU (GTX 1080+ / RTX)
+- 32GB+ RAM
+- 1TB+ fast SSD
+- CUDA 11.0+
+
+### Viewer Server
+- 2+ CPU cores
+- 4GB+ RAM
+- 500GB+ storage
+- Domain name (for SSL)
+
+## API Quick Reference
+
+### Pi Node API (port 8080)
+```bash
+curl http://pi-ip:8080/api/v1/status
+curl -X POST http://pi-ip:8080/api/v1/record/start
+curl -X POST http://pi-ip:8080/api/v1/record/stop
+```
+
+### Processing Server API (port 5100)
+```bash
+curl http://server:5100/health
+curl http://server:5100/api/sessions
+curl http://server:5100/api/sessions/GAME_ID/status
+```
+
+### Viewer Server API (port 80/443)
+```bash
+curl https://viewer/api/v1/health
+curl https://viewer/api/v1/viewer/games
+curl -X POST https://viewer/api/v1/query -d '{"query": "show goals"}'
+```
+
+## Game Day Workflow
+
+1. **Setup** (15 min before)
+   - Position cameras along sideline
+   - Power on, verify all 3 online
+   - Run framing assistant
+
+2. **Record**
+   - Press record on dashboard
+   - All cameras start synchronized
+
+3. **After Game**
+   - Stop recording
+   - Videos auto-upload to processing server
+   - Processing takes ~30-45 min
+
+4. **View**
+   - Access `https://your-server/watch`
+   - Enter team code
+   - Search, clip, share!
 
 ## License
 
-MIT License - See LICENSE file for details
+MIT License - See [LICENSE](LICENSE) for details.
 
 ## Version
 
-soccer-rig v1.0.0
+v1.0.0

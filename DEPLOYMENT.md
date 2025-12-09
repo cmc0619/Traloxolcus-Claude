@@ -232,7 +232,7 @@ ml:
 push:
   enabled: true
   method: "api"
-  viewer_server_url: "https://your-domain.com"
+  viewer_server_url: "http://your-server-ip:80"
   api_key: "your-secure-api-key"
 ```
 
@@ -273,7 +273,7 @@ sudo journalctl -u processing-server -f
 ### Requirements
 - VPS with 2+ CPU cores, 4GB+ RAM
 - 500GB+ storage for videos
-- Domain name with SSL certificate
+- Static IP or domain name (optional)
 
 ### Software Setup
 
@@ -282,7 +282,7 @@ sudo journalctl -u processing-server -f
 sudo apt update && sudo apt upgrade -y
 
 # 2. Install dependencies
-sudo apt install -y python3-pip python3-venv ffmpeg nginx certbot python3-certbot-nginx postgresql
+sudo apt install -y python3-pip python3-venv ffmpeg nginx postgresql
 
 # 3. Setup PostgreSQL
 sudo -u postgres psql << 'EOF'
@@ -359,11 +359,9 @@ server {
 EOF
 
 sudo ln -s /etc/nginx/sites-available/soccer-rig /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default  # Remove default site
 sudo nginx -t
 sudo systemctl reload nginx
-
-# SSL certificate
-sudo certbot --nginx -d your-domain.com
 ```
 
 ### Run as Service
@@ -427,7 +425,6 @@ sudo ufw allow 5100/tcp  # Ingest from Pi nodes
 
 # Viewer Server
 sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
 ```
 
 ---
@@ -473,7 +470,7 @@ soccer-rig offload --session GAME_20240315_140000
 curl http://192.168.1.100:5100/api/sessions/GAME_20240315_140000/status
 
 # 4. Once complete, video available at:
-# https://your-domain.com/watch
+# http://your-server-ip/watch
 ```
 
 ---
@@ -494,7 +491,7 @@ _team_codes = {
 
 ### End User Instructions
 
-1. Go to `https://your-domain.com/watch`
+1. Go to `http://your-server-ip/watch`
 2. Enter team code (e.g., `TIGERS24`)
 3. Select game from list
 4. Features available:
@@ -579,6 +576,6 @@ rsync -av /var/soccer-rig/videos/ /mnt/backup/
 |-----------|------|-----|
 | Pi Nodes | - | SSH: `pi@cam-*.local` |
 | Processing Server | 5100 | `http://192.168.1.100:5100` |
-| Viewer Server | 443 | `https://your-domain.com` |
-| Viewer Portal | 443 | `https://your-domain.com/watch` |
-| Admin Dashboard | 443 | `https://your-domain.com/admin` |
+| Viewer Server | 80 | `http://your-server-ip` |
+| Viewer Portal | 80 | `http://your-server-ip/watch` |
+| Admin Dashboard | 80 | `http://your-server-ip/admin` |

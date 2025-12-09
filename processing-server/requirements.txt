@@ -1,0 +1,23 @@
+# Soccer Rig Processing Server Dependencies
+
+# Web framework
+flask>=2.3.0
+requests>=2.31.0
+
+# Configuration
+pyyaml>=6.0
+
+# Computer Vision & ML
+opencv-python>=4.8.0
+numpy>=1.24.0
+ultralytics>=8.0.0  # YOLOv8
+
+# GPU Support (optional - install separately)
+# torch>=2.0.0
+# torchvision>=0.15.0
+
+# Cloud storage (optional)
+boto3>=1.28.0  # For S3 push
+
+# Utilities
+urllib3>=2.0.0

@@ -1,0 +1,64 @@
+# Soccer Rig Processing Server Configuration
+# Copy this to processing.yaml and customize
+
+server:
+  host: "0.0.0.0"
+  port: 5100
+  upload_max_size_gb: 50
+
+storage:
+  incoming_path: "/var/soccer-rig/incoming"
+  processing_path: "/var/soccer-rig/processing"
+  output_path: "/var/soccer-rig/output"
+  keep_raw_days: 7
+
+stitcher:
+  enabled: true
+  use_gpu: true
+  output_resolution: [5760, 1080]  # Wide panorama
+  output_fps: 30
+  output_bitrate_mbps: 35
+  codec: "h264_nvenc"  # Use "libx264" if no NVIDIA GPU
+  blend_width: 100
+  calibration_file: null
+
+ml:
+  enabled: true
+  use_gpu: true
+  device: "cuda:0"  # Use "cpu" if no GPU
+
+  # Detection models (downloaded automatically)
+  player_model: "yolov8x.pt"
+  ball_model: "yolov8n.pt"
+  pose_model: "yolov8x-pose.pt"
+
+  # Processing
+  detection_fps: 10  # Analyze 10 frames per second
+  batch_size: 8
+  confidence_threshold: 0.5
+
+  # Event detection
+  detect_goals: true
+  detect_shots: true
+  detect_saves: true
+  detect_passes: true
+  detect_fouls: false
+
+push:
+  enabled: true
+  viewer_server_url: "https://your-viewer-server.com"
+  api_key: "your-api-key-here"
+
+  # Transfer method: "api", "rsync", or "s3"
+  method: "api"
+
+  # For rsync method
+  rsync_target: "user@viewer-server:/var/soccer-rig/sessions"
+
+  # For S3 method
+  s3_bucket: "your-bucket-name"
+
+  # Options
+  delete_after_push: false
+  retry_attempts: 3
+  chunk_size_mb: 100

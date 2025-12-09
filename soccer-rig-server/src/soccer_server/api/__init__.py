@@ -820,4 +820,242 @@ def create_api(storage, stitcher=None, db_manager=None, analytics=None, clip_gen
         except Exception:
             return jsonify({"error": "Invalid share link"}), 400
 
+    # =========================================================================
+    # Processing Server Upload Endpoints
+    # =========================================================================
+
+    # Track in-progress chunked uploads from processing server
+    _processing_uploads = {}
+    _processing_uploads_lock = __import__('threading').Lock()
+
+    @api.route("/upload/init", methods=["POST"])
+    def init_processing_upload():
+        """
+        Initialize a chunked upload from processing server.
+
+        POST body:
+        {
+            "filename": "session_panorama.mp4",
+            "session_id": "GAME_20240315_140000",
+            "file_size": 5000000000,
+            "file_hash": "sha256...",
+            "chunk_size": 104857600
+        }
+        """
+        import os
+        import uuid
+
+        data = request.get_json() or {}
+
+        required = ['filename', 'session_id', 'file_size', 'chunk_size']
+        for field_name in required:
+            if field_name not in data:
+                return jsonify({"error": f"Missing field: {field_name}"}), 400
+
+        upload_id = str(uuid.uuid4())
+        session_id = data['session_id']
+
+        # Create temp directory for chunks
+        temp_dir = Path(storage.base_path) / "uploads" / upload_id
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Track the upload
+        with _processing_uploads_lock:
+            _processing_uploads[upload_id] = {
+                "session_id": session_id,
+                "filename": data['filename'],
+                "file_size": data['file_size'],
+                "file_hash": data.get('file_hash'),
+                "chunk_size": data['chunk_size'],
+                "temp_dir": str(temp_dir),
+                "chunks_received": [],
+            }
+
+        # Check for existing chunks (resume support)
+        existing = list(temp_dir.glob("chunk_*"))
+        resume_chunk = len(existing)
+
+        logger.info(f"Processing upload init: {upload_id}, resume from {resume_chunk}")
+
+        return jsonify({
+            "upload_id": upload_id,
+            "resume_chunk": resume_chunk,
+        })
+
+    @api.route("/upload/chunk", methods=["POST"])
+    def receive_processing_chunk():
+        """Receive a chunk from processing server."""
+        import hashlib
+
+        upload_id = request.form.get('upload_id')
+        chunk_index = int(request.form.get('chunk_index', 0))
+        chunk_hash = request.form.get('chunk_hash')
+
+        with _processing_uploads_lock:
+            if upload_id not in _processing_uploads:
+                return jsonify({"error": "Unknown upload_id"}), 404
+            upload_info = _processing_uploads[upload_id]
+
+        if 'chunk' not in request.files:
+            return jsonify({"error": "No chunk data"}), 400
+
+        chunk_data = request.files['chunk'].read()
+
+        # Verify hash
+        if chunk_hash:
+            actual_hash = hashlib.md5(chunk_data).hexdigest()
+            if actual_hash != chunk_hash:
+                return jsonify({"error": "Chunk hash mismatch"}), 400
+
+        # Save chunk
+        temp_dir = Path(upload_info['temp_dir'])
+        chunk_path = temp_dir / f"chunk_{chunk_index:06d}"
+        with open(chunk_path, 'wb') as f:
+            f.write(chunk_data)
+
+        with _processing_uploads_lock:
+            _processing_uploads[upload_id]['chunks_received'].append(chunk_index)
+
+        return jsonify({"status": "ok", "chunk_index": chunk_index})
+
+    @api.route("/upload/finalize", methods=["POST"])
+    def finalize_processing_upload():
+        """Finalize a chunked upload from processing server."""
+        import hashlib
+        import shutil
+
+        data = request.get_json() or {}
+        upload_id = data.get('upload_id')
+
+        with _processing_uploads_lock:
+            if upload_id not in _processing_uploads:
+                return jsonify({"error": "Unknown upload_id"}), 404
+            upload_info = _processing_uploads[upload_id]
+
+        session_id = upload_info['session_id']
+        temp_dir = Path(upload_info['temp_dir'])
+
+        # Create session directory
+        session_dir = Path(storage.base_path) / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        output_path = session_dir / upload_info['filename']
+
+        logger.info(f"Assembling upload {upload_id} -> {output_path}")
+
+        # Concatenate chunks
+        chunk_files = sorted(temp_dir.glob("chunk_*"))
+        with open(output_path, 'wb') as out_f:
+            for chunk_file in chunk_files:
+                with open(chunk_file, 'rb') as in_f:
+                    shutil.copyfileobj(in_f, out_f)
+
+        # Verify final hash
+        if upload_info.get('file_hash'):
+            sha256 = hashlib.sha256()
+            with open(output_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(8192), b''):
+                    sha256.update(chunk)
+            actual_hash = sha256.hexdigest()
+            if actual_hash != upload_info['file_hash']:
+                output_path.unlink(missing_ok=True)
+                return jsonify({"error": "File hash mismatch"}), 400
+
+        # Cleanup temp
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+        with _processing_uploads_lock:
+            del _processing_uploads[upload_id]
+
+        logger.info(f"Upload {upload_id} finalized: {output_path}")
+
+        return jsonify({
+            "status": "ok",
+            "path": str(output_path),
+            "session_id": session_id,
+        })
+
+    @api.route("/sessions/<session_id>/ready", methods=["POST"])
+    def mark_session_ready(session_id):
+        """
+        Mark a session as ready after processing server upload.
+
+        This triggers any post-processing needed on the viewer side,
+        like updating the database with events metadata.
+        """
+        session_dir = Path(storage.base_path) / session_id
+
+        if not session_dir.exists():
+            return jsonify({"error": "Session not found"}), 404
+
+        # Look for metadata file
+        metadata_path = session_dir / f"{session_id}_metadata.json"
+        if metadata_path.exists():
+            try:
+                import json
+                with open(metadata_path) as f:
+                    metadata = json.load(f)
+
+                # Import events to database if db_manager available
+                if db_manager and 'events' in metadata:
+                    game = db_manager.get_game(session_id)
+                    if not game:
+                        game = db_manager.create_game(
+                            session_id=session_id,
+                            title=metadata.get('manifest', {}).get('title', session_id),
+                        )
+
+                    # Import events
+                    events_imported = 0
+                    for event_data in metadata.get('events', []):
+                        try:
+                            from soccer_server.database import EventType
+                            event_type = EventType(event_data.get('event_type', 'highlight'))
+
+                            db_manager.add_event(
+                                game_id=game.id,
+                                event_type=event_type,
+                                timestamp_sec=event_data.get('timestamp_ms', 0) / 1000,
+                                confidence=event_data.get('confidence', 0.5),
+                            )
+                            events_imported += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to import event: {e}")
+
+                    logger.info(f"Imported {events_imported} events for session {session_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to process metadata: {e}")
+
+        # Mark session as processed
+        ready_marker = session_dir / ".ready"
+        ready_marker.touch()
+
+        # Look for stitched video
+        stitched_path = session_dir / f"{session_id}_panorama.mp4"
+        if stitched_path.exists():
+            storage.mark_stitched(session_id, str(stitched_path))
+
+        logger.info(f"Session {session_id} marked ready")
+
+        return jsonify({
+            "status": "ok",
+            "session_id": session_id,
+        })
+
+    @api.route("/sessions/<session_id>/metadata", methods=["GET"])
+    def get_session_metadata(session_id):
+        """Get processed metadata for a session."""
+        session_dir = Path(storage.base_path) / session_id
+        metadata_path = session_dir / f"{session_id}_metadata.json"
+
+        if not metadata_path.exists():
+            return jsonify({"error": "Metadata not found"}), 404
+
+        import json
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        return jsonify(metadata)
+
     return api

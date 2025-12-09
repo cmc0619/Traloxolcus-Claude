@@ -1,162 +1,279 @@
-# Soccer Rig Server
+# Soccer Rig Viewer Server
 
-Central server for receiving, storing, and processing soccer game recordings from Pi camera nodes.
+Web portal for viewing processed soccer recordings with natural language search, event timeline, and clip generation.
 
 ## Features
 
-- **Upload Receiver**: Accept video uploads from Pi nodes via REST API
-- **Checksum Verification**: Verify file integrity on upload
-- **Session Management**: Organize recordings by game/session
-- **Video Stitching**: Combine L/C/R cameras into panoramic view
-- **Web Dashboard**: View all recordings, trigger processing
-- **Storage Management**: Automatic cleanup, statistics
+- **Viewer Portal** - End-user interface for parents, coaches, players, scouts
+- **Team Code Auth** - Simple access control per team
+- **Natural Language Search** - "Show me all saves by the goalkeeper"
+- **Event Timeline** - Click to seek to goals, shots, saves, passes
+- **Clip Generation** - Create and share short clips
+- **Player Highlights** - Auto-generate highlight reels
+- **Admin Dashboard** - Manage games, players, analytics
 
-## Quick Start
+## Architecture
+
+```
+Processing Server ──► Viewer Server ──► End Users
+                          │
+                          ├── PostgreSQL (events, players)
+                          ├── Video Storage
+                          └── Flask + Nginx
+```
+
+## Installation
 
 ### Prerequisites
 
 - Python 3.10+
-- FFmpeg (for video stitching)
-- Redis (optional, for async processing)
+- PostgreSQL
+- FFmpeg
+- Nginx (for production)
 
-### Installation
+### Quick Setup
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/soccer-rig-server.git
-cd soccer-rig-server
+git clone https://github.com/cmc0619/Traloxolcus-Claude.git
+cd Traloxolcus-Claude/soccer-rig-server
 
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 
-# Create storage directories
-sudo mkdir -p /var/lib/soccer-server/{recordings,temp}
-sudo chown $USER:$USER /var/lib/soccer-server
+# Setup PostgreSQL
+sudo -u postgres psql << EOF
+CREATE USER soccer_rig WITH PASSWORD 'your-password';
+CREATE DATABASE soccer_rig OWNER soccer_rig;
+EOF
+
+# Configure
+mkdir -p ~/.config/soccer-rig
+cat > ~/.config/soccer-rig/server.yaml << EOF
+server:
+  host: "127.0.0.1"
+  port: 5000
+
+storage:
+  base_path: "/var/soccer-rig/videos"
+
+database:
+  url: "postgresql://soccer_rig:your-password@localhost/soccer_rig"
+EOF
+
+# Initialize database
+python -m soccer_server.app --init-db
+
+# Run
+python -m soccer_server.app
 ```
 
-### Running
+### Production Setup
 
-```bash
-# Development
-python -m soccer_server.app --debug
+See [DEPLOYMENT.md](../DEPLOYMENT.md) for full nginx + systemd setup.
 
-# Production (with gunicorn)
-gunicorn -w 4 -b 0.0.0.0:8000 "soccer_server.app:SoccerRigServer().app"
-```
+## Usage
 
-### Access
+### Viewer Portal
 
-- Dashboard: http://localhost:8000
-- API: http://localhost:8000/api/v1
+Access at `http://your-server/watch`
+
+1. Enter team code (e.g., `TIGERS24`)
+2. Select a game from the list
+3. Watch the panoramic video
+4. Use natural language search
+5. Click events to jump to timestamps
+6. Create and share clips
+
+### Admin Dashboard
+
+Access at `http://your-server/admin`
+
+- View all games and recordings
+- Manage team codes
+- View analytics and heatmaps
+- Trigger reprocessing
 
 ## API Reference
 
-### Upload Recording
+### Authentication
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/upload \
-  -F "file=@recording.mp4" \
-  -F "session_id=GAME_20240315_140000" \
-  -F "camera_id=CAM_L" \
-  -F "checksum=abc123..." \
-  -F "manifest={...}"
+# Validate team code
+curl "http://server/api/v1/viewer/auth?code=TIGERS24"
 ```
 
-### List Sessions
+### Games & Sessions
 
 ```bash
-curl http://localhost:8000/api/v1/sessions
+# List games for viewer
+curl http://server/api/v1/viewer/games
+
+# Get session details
+curl http://server/api/v1/sessions/GAME_20240315_140000
+
+# Stream video (supports Range requests)
+curl http://server/api/v1/sessions/GAME_ID/stream/stitched
 ```
 
-### Get Session Details
+### Natural Language Query
 
 ```bash
-curl http://localhost:8000/api/v1/sessions/GAME_20240315_140000
+# Search events
+curl -X POST http://server/api/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "show me all saves by the goalkeeper", "game_id": 1}'
 ```
 
-### Download Recording
+**Example queries:**
+- "show me all goals"
+- "saves by goalkeeper"
+- "shots in the second half"
+- "player 7 highlights"
+- "corners and free kicks"
+
+### Events
 
 ```bash
-curl -O http://localhost:8000/api/v1/sessions/GAME_20240315_140000/download/CAM_L
+# Get all events for a game
+curl http://server/api/v1/games/1/events
+
+# Filter by type
+curl "http://server/api/v1/games/1/events?type=save"
+
+# Goalkeeper events only
+curl http://server/api/v1/games/1/gk-events
 ```
 
-### Trigger Stitching
+### Clips
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/sessions/GAME_20240315_140000/stitch
+# Generate clip around timestamp
+curl -X POST http://server/api/v1/clips/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "GAME_20240315_140000",
+    "timestamp": 1234.5,
+    "duration_before": 5,
+    "duration_after": 5
+  }'
+
+# Generate player highlight reel
+curl -X POST http://server/api/v1/clips/player-highlight \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "GAME_20240315_140000",
+    "player_id": 1,
+    "max_duration": 120
+  }'
 ```
 
-### Storage Stats
+### Processing Server Upload
+
+These endpoints receive processed content from the GPU processing server:
 
 ```bash
-curl http://localhost:8000/api/v1/stats
+# Initialize chunked upload
+POST /api/v1/upload/init
+
+# Upload chunk
+POST /api/v1/upload/chunk
+
+# Finalize upload
+POST /api/v1/upload/finalize
+
+# Mark session ready (imports events to DB)
+POST /api/v1/sessions/<id>/ready
 ```
 
-## Storage Structure
+## Database Schema
 
-```
-/var/lib/soccer-server/
-├── recordings/
-│   └── sessions/
-│       └── GAME_20240315_140000/
-│           ├── CAM_L.mp4
-│           ├── CAM_L.json
-│           ├── CAM_C.mp4
-│           ├── CAM_C.json
-│           ├── CAM_R.mp4
-│           ├── CAM_R.json
-│           ├── session.json
-│           └── stitched.mp4
-└── temp/
-    └── (upload chunks)
-```
+### Games
+- `id`, `session_id`, `title`, `date`, `duration_sec`
+- `home_team`, `away_team`, `score`
 
-## Video Stitching
+### Players
+- `id`, `game_id`, `name`, `jersey_number`
+- `team`, `position`, `is_goalkeeper`
 
-The server can combine all three camera angles into a single panoramic view:
+### Events
+- `id`, `game_id`, `player_id`
+- `event_type` (goal, shot, save, pass, dribble, etc.)
+- `timestamp_sec`, `confidence`
+- `x`, `y` (field coordinates)
 
-```
-[CAM_L] [CAM_C] [CAM_R] → [Panorama 7680x2160]
-```
+## Event Types
 
-Output:
-- Resolution: 7680x2160 (8K wide)
-- Codec: H.265 (configurable)
-- Audio: From center camera
+| Type | Description |
+|------|-------------|
+| `goal` | Goal scored |
+| `shot` | Shot attempt |
+| `shot_on_target` | Shot on goal |
+| `save` | Goalkeeper save |
+| `pass` | Completed pass |
+| `cross` | Cross into box |
+| `corner` | Corner kick |
+| `free_kick` | Free kick |
+| `dribble` | Dribbling run |
+| `tackle` | Tackle attempt |
+| `punch` | GK punch |
+| `catch` | GK catch |
+| `distribution` | GK distribution |
 
 ## Configuration
 
-Edit `config/server.yaml`:
-
 ```yaml
-storage:
-  base_path: /var/lib/soccer-server/recordings
-  max_storage_gb: 1000
-  cleanup_after_days: 30
-
 server:
-  port: 8000
+  host: "127.0.0.1"
+  port: 5000
+  debug: false
+  upload_max_size_gb: 50
 
-processing:
-  stitch_enabled: true
-  stitch_output_width: 7680
-  stitch_output_height: 2160
+storage:
+  base_path: "/var/soccer-rig/videos"
+  clips_path: "/var/soccer-rig/clips"
+  max_storage_gb: 1000
+
+database:
+  url: "postgresql://user:pass@localhost/soccer_rig"
+
+analytics:
+  enabled: true
+  detection_fps: 10
 ```
 
-## Integration with Pi Nodes
+## Team Codes
 
-The server receives uploads from the soccer-rig Pi nodes. Configure Pi nodes with the server URL:
+Add team codes in the API or database:
 
-```yaml
-# On Pi node: /etc/soccer-rig/config.yaml
-offload:
-  server_url: http://your-server:8000
-  auto_upload: true
-  delete_after_confirm: true
+```python
+# In api/__init__.py
+_team_codes = {
+    "TIGERS24": {"name": "Tigers FC U14", "team_id": 1},
+    "EAGLES24": {"name": "Eagles SC", "team_id": 2},
+}
+```
+
+## File Structure
+
+```
+soccer-rig-server/
+├── src/soccer_server/
+│   ├── app.py           # Main Flask app
+│   ├── api/             # REST API endpoints
+│   ├── database/        # SQLAlchemy models
+│   ├── storage/         # File storage management
+│   ├── analytics/       # Video analysis pipeline
+│   ├── query/           # Natural language query
+│   └── config.py        # Configuration
+├── web/static/
+│   ├── index.html       # Admin dashboard
+│   ├── watch.html       # Viewer portal
+│   ├── css/
+│   └── js/
+└── requirements.txt
 ```
 
 ## License

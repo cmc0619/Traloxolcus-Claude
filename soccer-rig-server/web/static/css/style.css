@@ -1326,13 +1326,17 @@ body::before {
 }
 
 /* =========================================================================
-   Responsive
+   Responsive - Tablet and below
    ========================================================================= */
 @media (max-width: 768px) {
+    /* Safe area for iPhone notch/Dynamic Island */
     .header {
         flex-direction: column;
         gap: 1rem;
         padding: 1rem;
+        padding-top: max(1rem, env(safe-area-inset-top));
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
     }
 
     .header-left {
@@ -1345,10 +1349,25 @@ body::before {
     .nav-tabs {
         width: 100%;
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    .nav-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* 44px minimum touch targets (Apple HIG) */
+    .nav-tab {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0.75rem 1rem;
     }
 
     .main-content {
         padding: 1rem;
+        padding-bottom: max(1rem, env(safe-area-inset-bottom));
     }
 
     .stats-grid {
@@ -1378,6 +1397,14 @@ body::before {
         flex-direction: column;
     }
 
+    /* Prevent iOS zoom on input focus (requires 16px minimum) */
+    .search-box input,
+    .form-group input,
+    .form-group select,
+    .search-filters select {
+        font-size: 16px;
+    }
+
     .search-box input,
     .search-box .btn {
         width: 100%;
@@ -1393,19 +1420,56 @@ body::before {
 
     .game-tab {
         flex: 1 1 45%;
+        min-height: 44px;
+    }
+
+    /* 44px touch targets for buttons */
+    .btn {
+        min-height: 44px;
+        padding: 0.75rem 1.25rem;
+    }
+
+    .btn-small {
+        min-height: 36px;
+        padding: 0.5rem 0.875rem;
+    }
+
+    .btn-icon {
+        width: 44px;
+        height: 44px;
+    }
+
+    #theme-toggle {
+        width: 44px;
+        height: 44px;
     }
 
     .toast-container {
         left: 1rem;
         right: 1rem;
-        bottom: 1rem;
+        bottom: max(1rem, env(safe-area-inset-bottom));
     }
 
     .toast {
         max-width: none;
     }
+
+    /* Session item touch targets */
+    .session-item {
+        padding: 1rem;
+        min-height: 60px;
+    }
+
+    /* Event item touch targets */
+    .event-item {
+        padding: 0.875rem;
+        min-height: 56px;
+    }
 }
 
+/* =========================================================================
+   Responsive - Small phones (iPhone SE, etc.)
+   ========================================================================= */
 @media (max-width: 480px) {
     .stats-grid {
         grid-template-columns: 1fr;
@@ -1417,9 +1481,176 @@ body::before {
 
     .player-card {
         padding: 1rem;
+        min-height: 100px;
     }
 
     .player-number {
         font-size: 2rem;
+    }
+
+    .logo {
+        font-size: 1.25rem;
+    }
+
+    .card-header {
+        padding: 1rem;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .card-header h2 {
+        font-size: 1rem;
+    }
+
+    .card-body {
+        padding: 1rem;
+    }
+
+    .modal-header,
+    .modal-body,
+    .modal-footer {
+        padding: 1rem;
+    }
+
+    .event-filters {
+        flex-direction: column;
+    }
+
+    .heatmap-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+/* =========================================================================
+   Responsive - Very small phones (iPhone SE 1st gen, 320px)
+   ========================================================================= */
+@media (max-width: 375px) {
+    .header {
+        padding: 0.75rem;
+        padding-top: max(0.75rem, env(safe-area-inset-top));
+    }
+
+    .logo {
+        font-size: 1.125rem;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+    }
+
+    .stat-label {
+        font-size: 0.75rem;
+    }
+
+    .player-number {
+        font-size: 1.75rem;
+    }
+
+    .player-name {
+        font-size: 0.875rem;
+    }
+}
+
+/* =========================================================================
+   Touch device optimizations
+   ========================================================================= */
+@media (hover: none) and (pointer: coarse) {
+    /* Disable hover effects on touch devices (prevents sticky hover states) */
+    .stat-card:hover {
+        transform: none;
+        box-shadow: var(--shadow-md);
+    }
+
+    .session-item:hover {
+        transform: none;
+    }
+
+    .player-card:hover {
+        transform: none;
+    }
+
+    .clip-item:hover {
+        transform: none;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        transform: none;
+    }
+
+    #theme-toggle:hover {
+        transform: none;
+    }
+
+    /* Add active states for visual feedback on touch */
+    .btn:active {
+        transform: scale(0.96);
+        opacity: 0.9;
+    }
+
+    .stat-card:active {
+        transform: scale(0.98);
+    }
+
+    .session-item:active {
+        background: var(--bg-glass);
+    }
+
+    .player-card:active {
+        transform: scale(0.98);
+    }
+
+    /* Larger touch targets for scrollable areas */
+    .events-timeline {
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .search-suggestion {
+        padding: 1rem 1.25rem;
+        min-height: 48px;
+    }
+}
+
+/* =========================================================================
+   Landscape phone - maximize content area
+   ========================================================================= */
+@media (max-height: 500px) and (orientation: landscape) {
+    .header {
+        padding: 0.5rem 1rem;
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+        flex-direction: row;
+    }
+
+    .header-left {
+        flex-direction: row;
+        gap: 1rem;
+    }
+
+    .main-content {
+        padding: 0.5rem 1rem;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.75rem;
+    }
+
+    .stat-card {
+        padding: 0.75rem;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+    }
+
+    .modal-content {
+        max-height: 98vh;
+    }
+
+    .modal-body {
+        max-height: 60vh;
+        overflow-y: auto;
     }
 }

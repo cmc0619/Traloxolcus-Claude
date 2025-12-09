@@ -616,4 +616,208 @@ def create_api(storage, stitcher=None, db_manager=None, analytics=None, clip_gen
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    # =========================================================================
+    # Viewer Portal Endpoints
+    # =========================================================================
+
+    # Team codes for access control (in production, store in database)
+    _team_codes = {
+        "DEMO2024": {"name": "Demo Team", "team_id": 1},
+        "TIGERS24": {"name": "Tigers FC", "team_id": 2},
+        "EAGLES24": {"name": "Eagles SC", "team_id": 3},
+    }
+
+    @api.route("/viewer/auth", methods=["GET"])
+    def viewer_authenticate():
+        """
+        Validate a team code for viewer access.
+
+        Query params:
+        - code: Team access code
+        """
+        code = request.args.get("code", "").upper().strip()
+
+        if not code:
+            return jsonify({"valid": False, "error": "No code provided"})
+
+        # Check hardcoded codes (in production, query database)
+        if code in _team_codes:
+            team_info = _team_codes[code]
+            return jsonify({
+                "valid": True,
+                "team_name": team_info["name"],
+                "team_id": team_info["team_id"],
+            })
+
+        # Allow any code in demo mode
+        return jsonify({
+            "valid": True,
+            "team_name": code,
+            "team_id": 0,
+        })
+
+    @api.route("/viewer/teams", methods=["GET"])
+    def list_teams():
+        """List all teams (admin only in production)."""
+        return jsonify({
+            "teams": [
+                {"code": code, "name": info["name"]}
+                for code, info in _team_codes.items()
+            ]
+        })
+
+    @api.route("/sessions/<session_id>/stream/<camera_id>", methods=["GET"])
+    def stream_recording(session_id, camera_id):
+        """
+        Stream a recording with range request support.
+
+        Supports HTTP Range requests for video seeking.
+        """
+        from flask import Response
+
+        if camera_id == "stitched":
+            session = storage.get_session(session_id)
+            if not session or not session.stitched_path:
+                return jsonify({"error": "Stitched video not found"}), 404
+            file_path = Path(session.stitched_path)
+        else:
+            recording = storage.get_recording(session_id, camera_id)
+            if not recording:
+                return jsonify({"error": "Recording not found"}), 404
+            file_path = recording.path
+
+        if not file_path.exists():
+            return jsonify({"error": "File not found"}), 404
+
+        file_size = file_path.stat().st_size
+        range_header = request.headers.get("Range")
+
+        if range_header:
+            # Parse range header
+            byte_range = range_header.replace("bytes=", "").split("-")
+            start = int(byte_range[0])
+            end = int(byte_range[1]) if byte_range[1] else file_size - 1
+
+            if start >= file_size:
+                return Response(status=416)
+
+            length = end - start + 1
+
+            def generate():
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk_size = min(8192, remaining)
+                        data = f.read(chunk_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+
+            response = Response(
+                generate(),
+                status=206,
+                mimetype="video/mp4",
+                direct_passthrough=True,
+            )
+            response.headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+            response.headers["Accept-Ranges"] = "bytes"
+            response.headers["Content-Length"] = str(length)
+            return response
+        else:
+            # Full file response
+            return send_file(
+                file_path,
+                mimetype="video/mp4",
+            )
+
+    @api.route("/viewer/games", methods=["GET"])
+    def viewer_list_games():
+        """
+        List games available to viewer (with team filtering).
+
+        Query params:
+        - team_id: Filter by team (optional)
+        - season: Filter by season (optional)
+        - limit: Max results
+        """
+        limit = request.args.get("limit", 50, type=int)
+
+        sessions = storage.list_sessions(limit=limit, complete_only=True)
+
+        games = []
+        for s in sessions:
+            game_data = s.to_dict()
+            # Add viewer-friendly fields
+            game_data["thumbnail_url"] = f"/api/v1/sessions/{s.id}/thumbnail"
+            game_data["stream_url"] = f"/api/v1/sessions/{s.id}/stream/{'stitched' if s.stitched else 'CAM_C'}"
+            games.append(game_data)
+
+        return jsonify({
+            "games": games,
+            "count": len(games),
+        })
+
+    @api.route("/sessions/<session_id>/thumbnail", methods=["GET"])
+    def get_session_thumbnail(session_id):
+        """Get or generate a thumbnail for a session."""
+        session = storage.get_session(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+
+        # Check for existing thumbnail
+        thumb_path = Path(storage.base_path) / session_id / "thumbnail.jpg"
+        if thumb_path.exists():
+            return send_file(thumb_path, mimetype="image/jpeg")
+
+        # Generate thumbnail from video (first frame)
+        video_path = None
+        if session.stitched_path and Path(session.stitched_path).exists():
+            video_path = session.stitched_path
+        elif "CAM_C" in session.recordings:
+            video_path = str(session.recordings["CAM_C"].path)
+
+        if video_path:
+            try:
+                import subprocess
+                thumb_path.parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", video_path,
+                    "-vframes", "1", "-ss", "10",
+                    "-vf", "scale=640:-1",
+                    str(thumb_path)
+                ], capture_output=True, timeout=30)
+
+                if thumb_path.exists():
+                    return send_file(thumb_path, mimetype="image/jpeg")
+            except Exception as e:
+                logger.warning(f"Failed to generate thumbnail: {e}")
+
+        # Return placeholder
+        return jsonify({"error": "No thumbnail available"}), 404
+
+    @api.route("/viewer/share/<share_id>", methods=["GET"])
+    def get_shared_clip(share_id):
+        """Get a shared clip by ID (public, no auth required)."""
+        # In production, look up share_id in database
+        # For now, parse it as session_id:timestamp
+        try:
+            parts = share_id.split("_")
+            session_id = "_".join(parts[:-1])
+            timestamp = float(parts[-1])
+
+            session = storage.get_session(session_id)
+            if not session:
+                return jsonify({"error": "Video not found"}), 404
+
+            return jsonify({
+                "session_id": session_id,
+                "timestamp": timestamp,
+                "stream_url": f"/api/v1/sessions/{session_id}/stream/{'stitched' if session.stitched else 'CAM_C'}",
+                "game_name": session.name or session_id,
+            })
+        except Exception:
+            return jsonify({"error": "Invalid share link"}), 400
+
     return api

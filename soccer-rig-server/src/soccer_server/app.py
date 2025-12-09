@@ -121,12 +121,33 @@ class SoccerRigServer:
         )
         app.register_blueprint(api)
 
-        # Serve web dashboard
+        # Serve web dashboard (admin)
         @app.route("/")
         def index():
             return send_from_directory(
                 str(Path(__file__).parent.parent.parent / "web" / "static"),
                 "index.html"
+            )
+
+        @app.route("/admin")
+        def admin_dashboard():
+            """Admin dashboard alias."""
+            return send_from_directory(
+                str(Path(__file__).parent.parent.parent / "web" / "static"),
+                "index.html"
+            )
+
+        # Serve viewer portal (end users: parents, coaches, players)
+        @app.route("/watch")
+        def viewer_portal():
+            """
+            End-user viewer portal for watching games.
+
+            Accessible to parents, coaches, players, scouts with team codes.
+            """
+            return send_from_directory(
+                str(Path(__file__).parent.parent.parent / "web" / "static"),
+                "watch.html"
             )
 
         @app.route("/<path:path>")

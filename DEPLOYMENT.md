@@ -232,7 +232,7 @@ ml:
 push:
   enabled: true
   method: "api"
-  viewer_server_url: "http://your-server-ip:80"
+  viewer_server_url: "https://your-domain.com"  # or http://your-server-ip for no SSL
   api_key: "your-secure-api-key"
 ```
 
@@ -273,7 +273,7 @@ sudo journalctl -u processing-server -f
 ### Requirements
 - VPS with 2+ CPU cores, 4GB+ RAM
 - 500GB+ storage for videos
-- Static IP or domain name (optional)
+- Domain name (for SSL) or static IP
 
 ### Software Setup
 
@@ -282,7 +282,7 @@ sudo journalctl -u processing-server -f
 sudo apt update && sudo apt upgrade -y
 
 # 2. Install dependencies
-sudo apt install -y python3-pip python3-venv ffmpeg nginx postgresql
+sudo apt install -y python3-pip python3-venv ffmpeg nginx certbot python3-certbot-nginx postgresql
 
 # 3. Setup PostgreSQL
 sudo -u postgres psql << 'EOF'
@@ -362,6 +362,9 @@ sudo ln -s /etc/nginx/sites-available/soccer-rig /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default  # Remove default site
 sudo nginx -t
 sudo systemctl reload nginx
+
+# SSL certificate (recommended for production)
+sudo certbot --nginx -d your-domain.com
 ```
 
 ### Run as Service
@@ -425,6 +428,7 @@ sudo ufw allow 5100/tcp  # Ingest from Pi nodes
 
 # Viewer Server
 sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 ```
 
 ---
@@ -576,6 +580,6 @@ rsync -av /var/soccer-rig/videos/ /mnt/backup/
 |-----------|------|-----|
 | Pi Nodes | - | SSH: `pi@cam-*.local` |
 | Processing Server | 5100 | `http://192.168.1.100:5100` |
-| Viewer Server | 80 | `http://your-server-ip` |
-| Viewer Portal | 80 | `http://your-server-ip/watch` |
-| Admin Dashboard | 80 | `http://your-server-ip/admin` |
+| Viewer Server | 80/443 | `https://your-domain.com` |
+| Viewer Portal | 80/443 | `https://your-domain.com/watch` |
+| Admin Dashboard | 80/443 | `https://your-domain.com/admin` |

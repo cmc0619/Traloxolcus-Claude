@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soccer Rig Server - Analytics Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="logo">Soccer Rig Server</h1>
+                <nav class="nav-tabs">
+                    <button class="nav-tab active" data-tab="games">Games</button>
+                    <button class="nav-tab" data-tab="search">Search</button>
+                    <button class="nav-tab" data-tab="players">Players</button>
+                    <button class="nav-tab" data-tab="clips">Clips</button>
+                </nav>
+            </div>
+            <div class="header-right">
+                <span class="status-indicator" id="db-status" title="Database">DB</span>
+                <span class="status-indicator" id="analytics-status" title="Analytics">ML</span>
+                <button class="btn btn-icon" id="refresh-btn" title="Refresh">&#x21bb;</button>
+                <button class="btn btn-icon" id="theme-toggle" title="Toggle Dark Mode">&#9790;</button>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- Games Tab -->
+            <div class="tab-content active" id="tab-games">
+                <!-- Stats Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-value" id="session-count">--</span>
+                        <span class="stat-label">Games</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="analyzed-count">--</span>
+                        <span class="stat-label">Analyzed</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="event-count">--</span>
+                        <span class="stat-label">Events Tracked</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="storage-used">--</span>
+                        <span class="stat-label">Storage Used</span>
+                    </div>
+                </div>
+
+                <!-- Games List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Recording Sessions</h2>
+                        <div class="card-actions">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="complete-only"> Complete only
+                            </label>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="sessions-list" id="sessions-list">
+                            <p class="loading">Loading sessions...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Search Tab -->
+            <div class="tab-content" id="tab-search">
+                <div class="search-container">
+                    <div class="search-box">
+                        <input type="text" id="nl-search"
+                               placeholder="Search events... (e.g., 'show me all saves by the goalkeeper')"
+                               autocomplete="off">
+                        <button class="btn btn-primary" id="search-btn">Search</button>
+                    </div>
+                    <div class="search-suggestions" id="search-suggestions"></div>
+                    <div class="search-filters">
+                        <select id="search-game">
+                            <option value="">All Games</option>
+                        </select>
+                        <select id="search-type">
+                            <option value="">All Event Types</option>
+                            <option value="pass">Passes</option>
+                            <option value="shot">Shots</option>
+                            <option value="dribble">Dribbles</option>
+                            <option value="tackle">Tackles</option>
+                            <option value="gk_save">GK Saves</option>
+                            <option value="gk_punch">GK Punches</option>
+                            <option value="gk_distribution_throw">GK Distribution</option>
+                            <option value="sprint">Sprints</option>
+                            <option value="goal">Goals</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="card" id="search-results-card" style="display:none;">
+                    <div class="card-header">
+                        <h2>Search Results</h2>
+                        <span class="result-count" id="result-count"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="events-timeline" id="search-results">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Players Tab -->
+            <div class="tab-content" id="tab-players">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Roster Management</h2>
+                        <div class="card-actions">
+                            <select id="roster-game">
+                                <option value="">Select Game</option>
+                            </select>
+                            <button class="btn btn-primary" id="add-player-btn">+ Add Player</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="roster-grid" id="roster-grid">
+                            <p class="placeholder">Select a game to view/edit roster</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Player Stats -->
+                <div class="card" id="player-stats-card" style="display:none;">
+                    <div class="card-header">
+                        <h2 id="player-stats-title">Player Statistics</h2>
+                        <button class="btn btn-secondary" id="export-stats-btn">Export CSV</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="player-stats" id="player-stats">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Clips Tab -->
+            <div class="tab-content" id="tab-clips">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Generate Clips</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="clip-generator">
+                            <div class="form-group">
+                                <label>Game</label>
+                                <select id="clip-game">
+                                    <option value="">Select Game</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Player (for highlight reel)</label>
+                                <select id="clip-player">
+                                    <option value="">All Players</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Timestamp (seconds)</label>
+                                    <input type="number" id="clip-timestamp" placeholder="e.g., 1234">
+                                </div>
+                                <div class="form-group">
+                                    <label>Duration Before</label>
+                                    <input type="number" id="clip-before" value="5">
+                                </div>
+                                <div class="form-group">
+                                    <label>Duration After</label>
+                                    <input type="number" id="clip-after" value="5">
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button class="btn btn-primary" id="generate-clip-btn">Generate Event Clip</button>
+                                <button class="btn btn-secondary" id="generate-highlight-btn">Generate Player Highlight</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Generated Clips</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="clips-list" id="clips-list">
+                            <p class="placeholder">No clips generated yet</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Game Detail Modal -->
+        <div class="modal" id="game-modal">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2 id="game-title">Game Details</h2>
+                    <button class="btn-close" onclick="app.hideModal('game-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="game-tabs">
+                        <button class="game-tab active" data-gtab="overview">Overview</button>
+                        <button class="game-tab" data-gtab="events">Events</button>
+                        <button class="game-tab" data-gtab="heatmap">Heatmap</button>
+                        <button class="game-tab" data-gtab="roster">Roster</button>
+                    </div>
+                    <div class="game-tab-content active" id="gtab-overview">
+                        <div id="game-overview"></div>
+                    </div>
+                    <div class="game-tab-content" id="gtab-events">
+                        <div class="event-filters">
+                            <select id="modal-event-type">
+                                <option value="">All Types</option>
+                            </select>
+                            <select id="modal-event-player">
+                                <option value="">All Players</option>
+                            </select>
+                        </div>
+                        <div class="events-timeline" id="game-events"></div>
+                    </div>
+                    <div class="game-tab-content" id="gtab-heatmap">
+                        <div class="heatmap-container">
+                            <canvas id="heatmap-canvas" width="800" height="520"></canvas>
+                            <div class="heatmap-controls">
+                                <select id="heatmap-player">
+                                    <option value="">All Players</option>
+                                </select>
+                                <select id="heatmap-type">
+                                    <option value="positions">Positions</option>
+                                    <option value="passes">Passes</option>
+                                    <option value="shots">Shots</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="game-tab-content" id="gtab-roster">
+                        <div class="roster-editor" id="modal-roster"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-danger" id="delete-game-btn">Delete</button>
+                    <button class="btn btn-warning" id="analyze-btn">Analyze Video</button>
+                    <button class="btn btn-primary" id="stitch-btn">Stitch Panorama</button>
+                    <button class="btn btn-secondary" onclick="app.hideModal('game-modal')">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Player Modal -->
+        <div class="modal" id="player-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Add Player</h2>
+                    <button class="btn-close" onclick="app.hideModal('player-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="player-name" placeholder="Player Name">
+                    </div>
+                    <div class="form-group">
+                        <label>Jersey Number</label>
+                        <input type="number" id="player-number" placeholder="e.g., 7">
+                    </div>
+                    <div class="form-group">
+                        <label>Team</label>
+                        <select id="player-team">
+                            <option value="home">Home</option>
+                            <option value="away">Away</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Position</label>
+                        <select id="player-position">
+                            <option value="goalkeeper">Goalkeeper</option>
+                            <option value="defender">Defender</option>
+                            <option value="midfielder">Midfielder</option>
+                            <option value="forward">Forward</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="player-is-gk"> Is Goalkeeper
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" id="save-player-btn">Save Player</button>
+                    <button class="btn btn-secondary" onclick="app.hideModal('player-modal')">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Container -->
+        <div class="toast-container" id="toast-container"></div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

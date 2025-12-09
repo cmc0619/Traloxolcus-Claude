@@ -1,0 +1,26 @@
+# Soccer Rig Server Configuration
+
+storage:
+  base_path: /var/lib/soccer-server/recordings
+  temp_path: /var/lib/soccer-server/temp
+  max_storage_gb: 1000
+  cleanup_after_days: 30
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  debug: false
+  upload_max_size_gb: 50
+
+processing:
+  ffmpeg_path: ffmpeg
+  ffprobe_path: ffprobe
+  stitch_enabled: true
+  stitch_output_width: 7680
+  stitch_output_height: 2160
+  stitch_codec: libx265
+  stitch_crf: 23
+
+celery:
+  broker_url: redis://localhost:6379/0
+  result_backend: redis://localhost:6379/0

@@ -33,6 +33,9 @@ redis>=5.0.0
 requests>=2.31.0
 httpx>=0.25.0
 
+# TeamSnap integration
+# teamsnappier>=1.0.0  # Alternative: use our built-in client
+
 # Configuration
 pyyaml>=6.0.0
 python-dotenv>=1.0.0

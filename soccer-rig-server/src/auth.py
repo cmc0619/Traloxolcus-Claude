@@ -109,6 +109,7 @@ def register_auth_routes(app: Flask, db):
             # Map user type to role
             role_map = {
                 'parent': UserRole.PARENT,
+                'family': UserRole.FAMILY,
                 'player': UserRole.PLAYER,
                 'coach': UserRole.COACH
             }
@@ -152,8 +153,8 @@ def register_auth_routes(app: Flask, db):
         # Get linked players (children for parents, self for players)
         linked_players = []
 
-        if user.role.value == 'parent':
-            # Parents see their children
+        if user.role.value in ('parent', 'family'):
+            # Parents and family see linked children
             for child in user.children:
                 linked_players.append(_get_player_data(db, child))
         elif user.role.value == 'player':
@@ -218,9 +219,9 @@ def register_auth_routes(app: Flask, db):
         if not player:
             return "Player not found", 404
 
-        # Access control: parents see children, players see self, coaches see team
+        # Access control: parents/family see children, players see self, coaches see team
         has_access = False
-        if user.role.value == 'parent' and player in user.children:
+        if user.role.value in ('parent', 'family') and player in user.children:
             has_access = True
         elif user.role.value == 'player':
             # Player can see their own profile
@@ -471,6 +472,7 @@ REGISTER_HTML = """
                 <label>I am a...</label>
                 <select name="user_type">
                     <option value="parent">Parent / Guardian</option>
+                    <option value="family">Family Member</option>
                     <option value="player">Player</option>
                     <option value="coach">Coach</option>
                 </select>

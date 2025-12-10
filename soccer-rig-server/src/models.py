@@ -32,6 +32,7 @@ Base = declarative_base()
 
 class UserRole(enum.Enum):
     PARENT = "parent"      # Parent/guardian - can view games, get notifications
+    FAMILY = "family"      # Extended family (grandparent, etc.) - view access
     PLAYER = "player"      # Player - can view own stats/clips
     COACH = "coach"        # Coach - can view team stats, manage roster
     ADMIN = "admin"        # Admin - full access

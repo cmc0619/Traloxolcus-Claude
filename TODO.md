@@ -14,12 +14,15 @@
 
 ## High Priority (Core Features)
 
-### Live Streaming
-Stream games in real-time using WebRTC/HLS
-- [ ] WebRTC signaling server on processing server
-- [ ] HLS fallback for broader compatibility
-- [ ] Low-latency mode for coaching
-- [ ] Multi-camera view selector
+### TeamSnap Integration
+Automatic roster sync from TeamSnap accounts
+- [ ] OAuth2 flow for TeamSnap authentication
+- [ ] Pull team roster (names, jersey numbers, positions)
+- [ ] Pull parent/guardian contact emails
+- [ ] Auto-sync before each game
+- [ ] Jersey number to player name matching in ML events
+- [ ] "Goal by #7 - Marcus Johnson" style event labeling
+- [ ] Parent email notifications when their kid has clips
 
 ### Email Notifications
 Alert stakeholders when game processing is complete
@@ -47,19 +50,19 @@ Draw on video, add notes at timestamps
 
 ## Medium Priority (User Experience)
 
+### Live Streaming
+Stream games in real-time using WebRTC/HLS
+- [ ] WebRTC signaling server on processing server
+- [ ] HLS fallback for broader compatibility
+- [ ] Low-latency mode for coaching
+- [ ] Multi-camera view selector
+
 ### Highlight Reels (Enhanced)
 Extended highlight reel features beyond basic auto-generation
 - [ ] Custom highlight builder (drag-and-drop clips)
 - [ ] Per-player highlight reels
 - [ ] "Top 10 plays" compilation
 - [ ] Season best-of reels
-
-### Roster Import
-CSV/TeamSnap integration for player names
-- [ ] CSV upload with column mapping
-- [ ] TeamSnap API integration
-- [ ] Jersey number to player matching
-- [ ] Team photo import
 
 ### Social Media Export
 Vertical clips for TikTok/Instagram Reels

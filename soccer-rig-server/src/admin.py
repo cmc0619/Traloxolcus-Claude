@@ -42,8 +42,8 @@ def get_or_create_admin_password() -> str:
         if password:
             return password
 
-    # Generate new password
-    password = secrets.token_urlsafe(16)
+    # Generate new password (8 chars - we're not Fort Knox)
+    password = secrets.token_urlsafe(6)[:8]
     password_path.write_text(password)
     password_path.chmod(0o600)  # Only owner can read
 

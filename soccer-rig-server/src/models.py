@@ -609,3 +609,19 @@ def init_db(database_url: str):
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
     return engine
+
+
+def get_engine(database_url: str):
+    """Create SQLAlchemy engine from database URL."""
+    return create_engine(database_url, pool_pre_ping=True)
+
+
+def get_session(engine):
+    """
+    Create a scoped session factory.
+
+    Returns a session that can be used as a context manager or directly.
+    """
+    from sqlalchemy.orm import sessionmaker, scoped_session
+    session_factory = sessionmaker(bind=engine)
+    return scoped_session(session_factory)

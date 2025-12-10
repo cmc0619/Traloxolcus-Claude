@@ -748,3 +748,560 @@ def register_teamsnap_routes(app, db):
             'connected': bool(user and user.teamsnap_token),
             'user_id': user.teamsnap_user_id if user else None
         })
+
+    # -------------------------------------------------------------------------
+    # Data Explorer API - Browse imported TeamSnap data
+    # -------------------------------------------------------------------------
+
+    @app.route('/api/data/teams')
+    def api_data_teams():
+        """Get all teams in the system (for dropdowns)."""
+        from ..models import Team
+
+        teams = db.query(Team).filter(Team.is_active == True).all()
+
+        return jsonify({
+            'teams': [
+                {
+                    'id': t.id,
+                    'name': t.name,
+                    'team_code': t.team_code,
+                    'season': t.season,
+                    'birth_year_start': t.birth_year_start,
+                    'player_count': len(t.players),
+                    'from_teamsnap': t.teamsnap_team_id is not None
+                }
+                for t in teams
+            ]
+        })
+
+    @app.route('/api/data/players')
+    def api_data_players():
+        """Get all players (for dropdowns and linking)."""
+        from ..models import Player
+
+        team_id = request.args.get('team_id', type=int)
+
+        query = db.query(Player)
+        if team_id:
+            from ..models import team_player
+            query = query.join(team_player).filter(team_player.c.team_id == team_id)
+
+        players = query.order_by(Player.last_name, Player.first_name).all()
+
+        return jsonify({
+            'players': [
+                {
+                    'id': p.id,
+                    'name': p.full_name,
+                    'first_name': p.first_name,
+                    'last_name': p.last_name,
+                    'birth_year': p.birth_year,
+                    'position': p.default_position.value if p.default_position else None,
+                    'teams': [{'id': t.id, 'name': t.name} for t in p.teams],
+                    'from_teamsnap': p.teamsnap_member_id is not None
+                }
+                for p in players
+            ]
+        })
+
+    @app.route('/api/data/explorer')
+    def api_data_explorer():
+        """Full data explorer - all TeamSnap imported data."""
+        from ..models import Team, Player, Organization, User
+
+        # Get all data with TeamSnap links
+        teams = db.query(Team).filter(Team.teamsnap_team_id.isnot(None)).all()
+        players = db.query(Player).filter(Player.teamsnap_member_id.isnot(None)).all()
+        users_with_ts = db.query(User).filter(User.teamsnap_user_id.isnot(None)).all()
+
+        return jsonify({
+            'summary': {
+                'teams_from_teamsnap': len(teams),
+                'players_from_teamsnap': len(players),
+                'users_connected': len(users_with_ts)
+            },
+            'teams': [
+                {
+                    'id': t.id,
+                    'name': t.name,
+                    'team_code': t.team_code,
+                    'season': t.season,
+                    'teamsnap_id': t.teamsnap_team_id,
+                    'last_sync': t.teamsnap_last_sync.isoformat() if t.teamsnap_last_sync else None,
+                    'players': [
+                        {
+                            'id': p.id,
+                            'name': p.full_name,
+                            'birth_year': p.birth_year,
+                            'teamsnap_id': p.teamsnap_member_id
+                        }
+                        for p in t.players
+                    ]
+                }
+                for t in teams
+            ],
+            'unlinked_players': [
+                {
+                    'id': p.id,
+                    'name': p.full_name,
+                    'birth_year': p.birth_year,
+                    'teamsnap_id': p.teamsnap_member_id,
+                    'teams': [t.name for t in p.teams],
+                    'has_parents': len(p.parents) > 0
+                }
+                for p in players
+                if len(p.parents) == 0
+            ]
+        })
+
+    @app.route('/api/data/link-player', methods=['POST'])
+    def api_link_player():
+        """Link a user to a player (for parents/family to claim children)."""
+        from ..models import User, Player, parent_player
+        from sqlalchemy import and_
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        data = request.get_json()
+        player_id = data.get('player_id')
+        relationship = data.get('relationship', 'parent')
+
+        if not player_id:
+            return jsonify({'error': 'player_id required'}), 400
+
+        player = db.query(Player).get(player_id)
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+
+        # Check if already linked
+        existing = db.execute(
+            parent_player.select().where(
+                and_(
+                    parent_player.c.parent_id == user_id,
+                    parent_player.c.player_id == player_id
+                )
+            )
+        ).first()
+
+        if existing:
+            return jsonify({'error': 'Already linked'}), 400
+
+        # Create link
+        db.execute(
+            parent_player.insert().values(
+                parent_id=user_id,
+                player_id=player_id,
+                relationship=relationship
+            )
+        )
+        db.commit()
+
+        return jsonify({
+            'success': True,
+            'message': f'Linked to {player.full_name}'
+        })
+
+    @app.route('/api/data/create-player', methods=['POST'])
+    def api_create_player():
+        """Create a new player (when not from TeamSnap)."""
+        from ..models import Player, Team, PlayerPosition, team_player, parent_player
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        data = request.get_json()
+
+        # Validate required fields
+        if not data.get('first_name') or not data.get('last_name'):
+            return jsonify({'error': 'first_name and last_name required'}), 400
+        if not data.get('birth_year'):
+            return jsonify({'error': 'birth_year required'}), 400
+
+        # Map position
+        position = PlayerPosition.UNKNOWN
+        if data.get('position'):
+            try:
+                position = PlayerPosition(data['position'])
+            except ValueError:
+                pass
+
+        # Create player
+        player = Player(
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            birth_year=data['birth_year'],
+            default_position=position
+        )
+        db.add(player)
+        db.flush()
+
+        # Link to team if provided
+        if data.get('team_id'):
+            team = db.query(Team).get(data['team_id'])
+            if team:
+                db.execute(
+                    team_player.insert().values(
+                        team_id=team.id,
+                        player_id=player.id,
+                        jersey_number=data.get('jersey_number'),
+                        is_active=True
+                    )
+                )
+
+        # Auto-link to creating user if they want
+        if data.get('link_to_me'):
+            db.execute(
+                parent_player.insert().values(
+                    parent_id=user_id,
+                    player_id=player.id,
+                    relationship=data.get('relationship', 'parent')
+                )
+            )
+
+        db.commit()
+
+        return jsonify({
+            'success': True,
+            'player': {
+                'id': player.id,
+                'name': player.full_name
+            }
+        })
+
+    # -------------------------------------------------------------------------
+    # Data Explorer UI
+    # -------------------------------------------------------------------------
+
+    @app.route('/data-explorer')
+    def data_explorer_page():
+        """TeamSnap data explorer page."""
+        from flask import render_template_string
+
+        return render_template_string(DATA_EXPLORER_HTML)
+
+
+# =============================================================================
+# Data Explorer HTML Template
+# =============================================================================
+
+DATA_EXPLORER_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Explorer - Soccer Rig</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f0f4f8; color: #1a202c; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #1a472a 0%, #2d5a27 100%); color: white; padding: 1.5rem 2rem; }
+        .header-content { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .summary-card { background: white; padding: 1.5rem; border-radius: 0.75rem; text-align: center; }
+        .summary-value { font-size: 2.5rem; font-weight: 700; color: #10b981; }
+        .summary-label { color: #64748b; font-size: 0.875rem; }
+        .card { background: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .card h2 { font-size: 1.25rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+        .badge { background: #e2e8f0; color: #64748b; padding: 0.25rem 0.5rem; border-radius: 1rem; font-size: 0.75rem; }
+        .badge.ts { background: #dbeafe; color: #1d4ed8; }
+        .team-card { background: #f8fafc; border-radius: 0.5rem; padding: 1rem; margin-bottom: 0.75rem; }
+        .team-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+        .team-name { font-weight: 600; }
+        .team-meta { color: #64748b; font-size: 0.875rem; }
+        .player-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+        .player-chip { background: #e2e8f0; padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.875rem; }
+        .player-chip.unlinked { background: #fef3c7; color: #92400e; }
+        .actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+        .btn { padding: 0.5rem 1rem; border-radius: 0.5rem; border: none; cursor: pointer; font-weight: 500; }
+        .btn-primary { background: #10b981; color: white; }
+        .btn-secondary { background: #e2e8f0; color: #374151; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 100; }
+        .modal.active { display: flex; }
+        .modal-content { background: white; padding: 2rem; border-radius: 1rem; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+        .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        .form-group input, .form-group select { width: 100%; padding: 0.75rem; border: 2px solid #e2e8f0; border-radius: 0.5rem; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #10b981; }
+        .checkbox-group { display: flex; align-items: center; gap: 0.5rem; }
+        .checkbox-group input { width: auto; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <h1>Data Explorer</h1>
+            <a href="/dashboard" style="color: white; text-decoration: none;">Back to Dashboard</a>
+        </div>
+    </div>
+    <div class="container">
+        <div class="summary-grid" id="summary">
+            <div class="summary-card">
+                <div class="summary-value" id="team-count">-</div>
+                <div class="summary-label">Teams</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="player-count">-</div>
+                <div class="summary-label">Players</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="connected-count">-</div>
+                <div class="summary-label">Users Connected</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="unlinked-count">-</div>
+                <div class="summary-label">Unlinked Players</div>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-primary" onclick="showAddPlayerModal()">+ Add Player</button>
+            <button class="btn btn-secondary" onclick="syncTeamSnap()">Sync TeamSnap</button>
+            <button class="btn btn-secondary" onclick="loadData()">Refresh</button>
+        </div>
+
+        <div class="card">
+            <h2>Teams <span class="badge ts">from TeamSnap</span></h2>
+            <div id="teams-list">Loading...</div>
+        </div>
+
+        <div class="card">
+            <h2>Unlinked Players <span class="badge">need parent link</span></h2>
+            <div id="unlinked-list">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Add Player Modal -->
+    <div class="modal" id="add-player-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add Player</h2>
+                <button class="modal-close" onclick="hideModal('add-player-modal')">&times;</button>
+            </div>
+            <form id="add-player-form" onsubmit="createPlayer(event)">
+                <div class="form-group">
+                    <label>First Name</label>
+                    <input type="text" name="first_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Last Name</label>
+                    <input type="text" name="last_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Birth Year</label>
+                    <input type="number" name="birth_year" min="2000" max="2020" required>
+                </div>
+                <div class="form-group">
+                    <label>Position</label>
+                    <select name="position">
+                        <option value="unknown">Unknown</option>
+                        <option value="goalkeeper">Goalkeeper</option>
+                        <option value="defender">Defender</option>
+                        <option value="midfielder">Midfielder</option>
+                        <option value="forward">Forward</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Team</label>
+                    <select name="team_id" id="team-select">
+                        <option value="">No Team</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Jersey Number</label>
+                    <input type="text" name="jersey_number" placeholder="Optional">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" name="link_to_me" id="link-to-me" checked>
+                    <label for="link-to-me">Link this player to my account</label>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Create Player</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Link Player Modal -->
+    <div class="modal" id="link-player-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Link Player</h2>
+                <button class="modal-close" onclick="hideModal('link-player-modal')">&times;</button>
+            </div>
+            <p id="link-player-name" style="margin-bottom: 1rem; font-weight: 600;"></p>
+            <div class="form-group">
+                <label>Relationship</label>
+                <select id="link-relationship">
+                    <option value="parent">Parent</option>
+                    <option value="guardian">Guardian</option>
+                    <option value="grandparent">Grandparent</option>
+                    <option value="family">Family Member</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" style="width: 100%;" onclick="linkPlayer()">Link to My Account</button>
+        </div>
+    </div>
+
+    <script>
+        let currentLinkPlayerId = null;
+
+        async function loadData() {
+            try {
+                const response = await fetch('/api/data/explorer');
+                const data = await response.json();
+
+                // Update summary
+                document.getElementById('team-count').textContent = data.summary.teams_from_teamsnap;
+                document.getElementById('player-count').textContent = data.summary.players_from_teamsnap;
+                document.getElementById('connected-count').textContent = data.summary.users_connected;
+                document.getElementById('unlinked-count').textContent = data.unlinked_players.length;
+
+                // Render teams
+                const teamsList = document.getElementById('teams-list');
+                if (data.teams.length === 0) {
+                    teamsList.innerHTML = '<p style="color: #64748b;">No teams imported yet. Connect TeamSnap to sync teams.</p>';
+                } else {
+                    teamsList.innerHTML = data.teams.map(team => `
+                        <div class="team-card">
+                            <div class="team-header">
+                                <div>
+                                    <div class="team-name">${team.name}</div>
+                                    <div class="team-meta">Code: ${team.team_code} | Season: ${team.season || 'N/A'}</div>
+                                </div>
+                                <span class="badge">${team.players.length} players</span>
+                            </div>
+                            <div class="player-list">
+                                ${team.players.map(p => `<span class="player-chip">${p.name} (${p.birth_year})</span>`).join('')}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+
+                // Render unlinked players
+                const unlinkedList = document.getElementById('unlinked-list');
+                if (data.unlinked_players.length === 0) {
+                    unlinkedList.innerHTML = '<p style="color: #64748b;">All players are linked to parent accounts.</p>';
+                } else {
+                    unlinkedList.innerHTML = `
+                        <div class="player-list">
+                            ${data.unlinked_players.map(p => `
+                                <span class="player-chip unlinked" style="cursor: pointer;" onclick="showLinkModal(${p.id}, '${p.name}')">
+                                    ${p.name} (${p.birth_year}) - ${p.teams.join(', ') || 'No team'}
+                                </span>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+
+                // Load teams for dropdown
+                loadTeamsDropdown();
+
+            } catch (error) {
+                console.error('Failed to load data:', error);
+            }
+        }
+
+        async function loadTeamsDropdown() {
+            const response = await fetch('/api/data/teams');
+            const data = await response.json();
+
+            const select = document.getElementById('team-select');
+            select.innerHTML = '<option value="">No Team</option>' +
+                data.teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+        }
+
+        async function syncTeamSnap() {
+            try {
+                const response = await fetch('/api/teamsnap/sync', { method: 'POST' });
+                const result = await response.json();
+                if (result.error) {
+                    alert('Sync failed: ' + result.error);
+                } else {
+                    alert(`Synced! Created ${result.teams_created} teams, ${result.players_created} players`);
+                    loadData();
+                }
+            } catch (error) {
+                alert('Sync failed: ' + error.message);
+            }
+        }
+
+        function showAddPlayerModal() {
+            document.getElementById('add-player-modal').classList.add('active');
+        }
+
+        function showLinkModal(playerId, playerName) {
+            currentLinkPlayerId = playerId;
+            document.getElementById('link-player-name').textContent = playerName;
+            document.getElementById('link-player-modal').classList.add('active');
+        }
+
+        function hideModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        async function createPlayer(event) {
+            event.preventDefault();
+            const form = event.target;
+            const data = {
+                first_name: form.first_name.value,
+                last_name: form.last_name.value,
+                birth_year: parseInt(form.birth_year.value),
+                position: form.position.value,
+                team_id: form.team_id.value ? parseInt(form.team_id.value) : null,
+                jersey_number: form.jersey_number.value || null,
+                link_to_me: form.link_to_me.checked
+            };
+
+            try {
+                const response = await fetch('/api/data/create-player', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('Player created: ' + result.player.name);
+                    hideModal('add-player-modal');
+                    form.reset();
+                    loadData();
+                } else {
+                    alert('Failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed: ' + error.message);
+            }
+        }
+
+        async function linkPlayer() {
+            const relationship = document.getElementById('link-relationship').value;
+
+            try {
+                const response = await fetch('/api/data/link-player', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ player_id: currentLinkPlayerId, relationship })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(result.message);
+                    hideModal('link-player-modal');
+                    loadData();
+                } else {
+                    alert('Failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed: ' + error.message);
+            }
+        }
+
+        // Initial load
+        loadData();
+    </script>
+</body>
+</html>
+"""

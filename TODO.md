@@ -8,28 +8,39 @@
 - [x] Team code authentication
 - [x] Clip creation and sharing
 - [x] Mobile-responsive CSS for viewer and admin dashboards
-- [x] Complete deployment documentation
+- [x] Docker containerization with SSL
+- [x] TeamSnap integration
 
 ---
 
 ## High Priority (Core Features)
 
-### TeamSnap Integration
-Automatic roster sync from TeamSnap accounts
-- [ ] OAuth2 flow for TeamSnap authentication
-- [ ] Pull team roster (names, jersey numbers, positions)
-- [ ] Pull parent/guardian contact emails
-- [ ] Auto-sync before each game
-- [ ] Jersey number to player name matching in ML events
-- [ ] "Goal by #7 - Marcus Johnson" style event labeling
-- [ ] Parent email notifications when their kid has clips
+### Multi-Team & Parent Portal
+Support multiple teams with parent/family logins
+- [x] Database schema for multi-team support
+- [x] Parent accounts (can have multiple children)
+- [x] Players can be on multiple teams
+- [x] Birth year for age grouping (not U13/U14)
+- [ ] Parent login/registration
+- [ ] Family dashboard (see all kids' clips)
+- [ ] Per-child notification preferences
 
 ### Email Notifications
-Alert stakeholders when game processing is complete
-- [ ] SMTP configuration in processing server
-- [ ] Email templates (processing complete, highlights ready)
-- [ ] Webhook support for custom integrations
-- [ ] Team contact list management
+Alert parents when their kid has new content
+- [ ] SMTP configuration
+- [ ] Email templates (game ready, new clips, highlights)
+- [ ] Per-player email triggers (goals, saves, etc.)
+- [ ] Digest mode (daily summary vs instant)
+- [ ] Unsubscribe handling
+
+### Player Statistics
+Track individual player stats across games and seasons
+- [ ] Goals, assists, shots, saves per game
+- [ ] Season totals and averages
+- [ ] Player profile pages
+- [ ] Game-by-game breakdown
+- [ ] Position-specific stats (GK save %, striker conversion rate)
+- [ ] Comparison across teammates
 
 ### Automated Highlights
 Auto-generate 2-min highlight reel from top events
@@ -37,6 +48,7 @@ Auto-generate 2-min highlight reel from top events
 - [ ] Automatic clip extraction and concatenation
 - [ ] Transition effects between clips
 - [ ] Background music overlay option
+- [ ] Per-player highlight reels
 
 ### Coach Annotation Tool
 Draw on video, add notes at timestamps
@@ -57,10 +69,9 @@ Stream games in real-time using WebRTC/HLS
 - [ ] Low-latency mode for coaching
 - [ ] Multi-camera view selector
 
-### Highlight Reels (Enhanced)
-Extended highlight reel features beyond basic auto-generation
+### Enhanced Highlight Reels
+Extended highlight reel features
 - [ ] Custom highlight builder (drag-and-drop clips)
-- [ ] Per-player highlight reels
 - [ ] "Top 10 plays" compilation
 - [ ] Season best-of reels
 
@@ -90,13 +101,6 @@ React Native viewer app for iOS/Android
 - [ ] Offline clip download
 - [ ] Share to device gallery
 
-### Season Statistics
-Track player stats across multiple games
-- [ ] Player profile pages
-- [ ] Season totals (goals, assists, shots, etc.)
-- [ ] Game-by-game breakdown
-- [ ] Comparison charts
-
 ### Heat Map Generation
 Player positioning visualization
 - [ ] Position tracking from ML pipeline
@@ -104,26 +108,12 @@ Player positioning visualization
 - [ ] Per-player and team-wide views
 - [ ] Time-slice filtering
 
-### Parent Purchase Portal
-Buy individual clips/highlights
-- [ ] Stripe/PayPal integration
-- [ ] Clip watermarking for previews
-- [ ] HD download after purchase
-- [ ] Subscription option for full access
-
 ### AI Commentary
 Auto-generate play-by-play narration
 - [ ] Event-to-text generation
 - [ ] Text-to-speech synthesis
 - [ ] Multiple voice options
 - [ ] Real-time vs post-game modes
-
-### Referee Incident Review
-Slow-mo, multiple angles for disputed calls
-- [ ] Frame-by-frame scrubbing
-- [ ] Synchronized multi-angle view
-- [ ] Timestamp bookmarking
-- [ ] Export incident report
 
 ---
 

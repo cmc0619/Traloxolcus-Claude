@@ -1,8 +1,12 @@
-# Soccer Rig Processing Server Dependencies
+# Soccer Rig Processing Server (Bench) Dependencies
 
 # Web framework
 flask>=2.3.0
 requests>=2.31.0
+gunicorn>=21.0.0
+
+# System monitoring (for status page)
+psutil>=5.9.0
 
 # Configuration
 pyyaml>=6.0

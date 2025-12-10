@@ -31,9 +31,20 @@ Base = declarative_base()
 # =============================================================================
 
 class UserRole(enum.Enum):
-    PARENT = "parent"
-    COACH = "coach"
-    ADMIN = "admin"
+    PARENT = "parent"      # Parent/guardian - can view games, get notifications
+    PLAYER = "player"      # Player - can view own stats/clips
+    COACH = "coach"        # Coach - can view team stats, manage roster
+    ADMIN = "admin"        # Admin - full access
+
+
+class FeatureAccess(enum.Enum):
+    """Feature flags for future feature-based auth."""
+    STREAMING = "streaming"           # Can watch live game streams
+    CLIPS = "clips"                   # Can view/download clips
+    SOCIAL_EXPORT = "social_export"   # Can export to social media
+    STATS = "stats"                   # Can view detailed statistics
+    HEATMAPS = "heatmaps"             # Can view heat maps
+    HIGHLIGHTS = "highlights"         # Can view auto-generated highlights
 
 
 class PlayerPosition(enum.Enum):

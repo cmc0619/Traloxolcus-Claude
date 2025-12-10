@@ -1,21 +1,18 @@
 """
-Parent Portal - Authentication and Family Dashboard
+Authentication - Unified Login System
 
-Features:
-- Parent registration and login
-- Family dashboard showing all children's clips
-- Per-child notification preferences
-- Password reset via email
+Simple authentication for all user types:
+- Parents, players, coaches
+- User type tracked but functionality is shared
+- Dashboard adapts based on user type
 """
 
 import os
 import secrets
-import hashlib
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Optional, Dict, List
+from typing import Optional
 from flask import Flask, request, session, jsonify, redirect, url_for, render_template_string
-from werkzeug.security import generate_password_hash, check_password_hash
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,32 +23,35 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 def login_required(f):
-    """Decorator to require parent login."""
+    """Decorator to require login."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             if request.is_json:
                 return jsonify({'error': 'Authentication required'}), 401
-            return redirect(url_for('parent_login'))
+            return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
 
 
-def generate_token(length: int = 32) -> str:
-    """Generate a secure random token."""
-    return secrets.token_urlsafe(length)
+def get_current_user(db):
+    """Get the current logged-in user."""
+    if 'user_id' not in session:
+        return None
+    from .models import User
+    return db.query(User).get(session['user_id'])
 
 
 # =============================================================================
 # Flask Routes
 # =============================================================================
 
-def register_parent_routes(app: Flask, db):
-    """Register parent portal routes."""
+def register_auth_routes(app: Flask, db):
+    """Register authentication routes."""
 
     @app.route('/login', methods=['GET', 'POST'])
-    def parent_login():
-        """Parent login page."""
+    def login():
+        """Login page."""
         from .models import User
 
         if request.method == 'POST':
@@ -64,10 +64,11 @@ def register_parent_routes(app: Flask, db):
                 session['user_id'] = user.id
                 session['user_email'] = user.email
                 session['user_name'] = user.full_name
+                session['user_role'] = user.role.value
                 user.last_login = datetime.utcnow()
                 db.commit()
 
-                next_url = request.args.get('next', url_for('family_dashboard'))
+                next_url = request.args.get('next', url_for('dashboard'))
                 return redirect(next_url)
             else:
                 return render_template_string(LOGIN_HTML, error='Invalid email or password')
@@ -75,8 +76,8 @@ def register_parent_routes(app: Flask, db):
         return render_template_string(LOGIN_HTML, error=None)
 
     @app.route('/register', methods=['GET', 'POST'])
-    def parent_register():
-        """Parent registration page."""
+    def register():
+        """Registration page."""
         from .models import User, UserRole
 
         if request.method == 'POST':
@@ -85,6 +86,7 @@ def register_parent_routes(app: Flask, db):
             confirm = request.form.get('confirm_password', '')
             first_name = request.form.get('first_name', '').strip()
             last_name = request.form.get('last_name', '').strip()
+            user_type = request.form.get('user_type', 'parent')
 
             # Validation
             errors = []
@@ -104,12 +106,20 @@ def register_parent_routes(app: Flask, db):
             if errors:
                 return render_template_string(REGISTER_HTML, errors=errors)
 
+            # Map user type to role
+            role_map = {
+                'parent': UserRole.PARENT,
+                'player': UserRole.PLAYER,
+                'coach': UserRole.COACH
+            }
+            role = role_map.get(user_type, UserRole.PARENT)
+
             # Create user
             user = User(
                 email=email,
                 first_name=first_name,
                 last_name=last_name,
-                role=UserRole.PARENT
+                role=role
             )
             user.set_password(password)
             db.add(user)
@@ -119,66 +129,59 @@ def register_parent_routes(app: Flask, db):
             session['user_id'] = user.id
             session['user_email'] = user.email
             session['user_name'] = user.full_name
+            session['user_role'] = user.role.value
 
-            return redirect(url_for('family_dashboard'))
+            return redirect(url_for('dashboard'))
 
         return render_template_string(REGISTER_HTML, errors=None)
 
     @app.route('/logout')
-    def parent_logout():
+    def logout():
         """Logout."""
         session.clear()
-        return redirect(url_for('parent_login'))
+        return redirect(url_for('login'))
 
     @app.route('/dashboard')
     @login_required
-    def family_dashboard():
-        """Family dashboard - shows all children's clips."""
+    def dashboard():
+        """User dashboard - adapts to user type."""
         from .models import User, Player, GameEvent, Clip, Game
 
         user = db.query(User).get(session['user_id'])
 
-        # Get all children
-        children_data = []
-        for child in user.children:
-            # Get recent clips for this child
-            recent_clips = db.query(Clip, Game).join(
-                Game, Clip.game_id == Game.id
-            ).join(
-                GameEvent, Clip.event_id == GameEvent.id
-            ).filter(
-                GameEvent.player_id == child.id
-            ).order_by(Clip.created_at.desc()).limit(5).all()
+        # Get linked players (children for parents, self for players)
+        linked_players = []
 
-            # Get recent events
-            recent_events = db.query(GameEvent, Game).join(
-                Game, GameEvent.game_id == Game.id
-            ).filter(
-                GameEvent.player_id == child.id
-            ).order_by(GameEvent.id.desc()).limit(10).all()
-
-            # Get stats
-            from .services.statistics import StatisticsService
-            stats_service = StatisticsService(db)
-
-            children_data.append({
-                'player': child,
-                'teams': list(child.teams),
-                'recent_clips': [(c, g) for c, g in recent_clips],
-                'recent_events': [(e, g) for e, g in recent_events],
-                'clip_count': len(recent_clips)
-            })
+        if user.role.value == 'parent':
+            # Parents see their children
+            for child in user.children:
+                linked_players.append(_get_player_data(db, child))
+        elif user.role.value == 'player':
+            # Players see themselves (if linked to a Player record)
+            # Check if there's a player with matching email or linked
+            player = db.query(Player).filter(
+                Player.first_name == user.first_name,
+                Player.last_name == user.last_name
+            ).first()
+            if player:
+                linked_players.append(_get_player_data(db, player))
+        elif user.role.value == 'coach':
+            # Coaches see all players on their teams
+            for team in user.coached_teams:
+                for player in team.players:
+                    if not any(p['player'].id == player.id for p in linked_players):
+                        linked_players.append(_get_player_data(db, player))
 
         return render_template_string(
             DASHBOARD_HTML,
             user=user,
-            children=children_data
+            players=linked_players
         )
 
     @app.route('/settings', methods=['GET', 'POST'])
     @login_required
-    def parent_settings():
-        """Parent settings - notification preferences."""
+    def settings():
+        """User settings - notification preferences."""
         from .models import User, NotificationFrequency
 
         user = db.query(User).get(session['user_id'])
@@ -199,7 +202,7 @@ def register_parent_routes(app: Flask, db):
             user.phone = request.form.get('phone', user.phone)
 
             db.commit()
-            return redirect(url_for('parent_settings') + '?saved=1')
+            return redirect(url_for('settings') + '?saved=1')
 
         return render_template_string(SETTINGS_HTML, user=user)
 
@@ -207,7 +210,7 @@ def register_parent_routes(app: Flask, db):
     @login_required
     def player_profile(player_id: int):
         """Player profile page with stats and clips."""
-        from .models import User, Player, GameEvent, Clip, Game, PlayerSeasonStats
+        from .models import User, Player, GameEvent, Clip, Game
 
         user = db.query(User).get(session['user_id'])
         player = db.query(Player).get(player_id)
@@ -215,8 +218,23 @@ def register_parent_routes(app: Flask, db):
         if not player:
             return "Player not found", 404
 
-        # Verify parent has access to this player
-        if player not in user.children:
+        # Access control: parents see children, players see self, coaches see team
+        has_access = False
+        if user.role.value == 'parent' and player in user.children:
+            has_access = True
+        elif user.role.value == 'player':
+            # Player can see their own profile
+            if player.first_name == user.first_name and player.last_name == user.last_name:
+                has_access = True
+        elif user.role.value == 'coach':
+            for team in user.coached_teams:
+                if player in team.players:
+                    has_access = True
+                    break
+        elif user.role.value == 'admin':
+            has_access = True
+
+        if not has_access:
             return "Access denied", 403
 
         # Get all clips
@@ -243,73 +261,64 @@ def register_parent_routes(app: Flask, db):
             PLAYER_PROFILE_HTML,
             player=player,
             clips=clips,
-            stats=stats
+            stats=stats,
+            user=user
         )
 
     # -------------------------------------------------------------------------
     # API Endpoints
     # -------------------------------------------------------------------------
 
-    @app.route('/api/parent/children')
+    @app.route('/api/user/me')
     @login_required
-    def api_get_children():
-        """Get all children for current user."""
+    def api_current_user():
+        """Get current user info."""
         from .models import User
 
         user = db.query(User).get(session['user_id'])
 
         return jsonify({
-            'children': [
-                {
-                    'id': child.id,
-                    'name': child.full_name,
-                    'birth_year': child.birth_year,
-                    'teams': [
-                        {'id': t.id, 'name': t.name, 'season': t.season}
-                        for t in child.teams
-                    ]
-                }
-                for child in user.children
-            ]
+            'id': user.id,
+            'email': user.email,
+            'name': user.full_name,
+            'role': user.role.value,
+            'children_count': len(user.children),
+            'teams_count': len(user.coached_teams)
         })
 
-    @app.route('/api/parent/clips')
+    @app.route('/api/user/players')
     @login_required
-    def api_get_family_clips():
-        """Get recent clips for all children."""
-        from .models import User, GameEvent, Clip, Game
+    def api_get_players():
+        """Get all players linked to current user."""
+        from .models import User, Player
 
         user = db.query(User).get(session['user_id'])
-        child_ids = [c.id for c in user.children]
+        players = []
 
-        if not child_ids:
-            return jsonify({'clips': []})
-
-        clips = db.query(Clip, Game, GameEvent).join(
-            Game, Clip.game_id == Game.id
-        ).join(
-            GameEvent, Clip.event_id == GameEvent.id
-        ).filter(
-            GameEvent.player_id.in_(child_ids)
-        ).order_by(Clip.created_at.desc()).limit(50).all()
+        if user.role.value == 'parent':
+            players = user.children
+        elif user.role.value == 'coach':
+            for team in user.coached_teams:
+                for player in team.players:
+                    if player not in players:
+                        players.append(player)
 
         return jsonify({
-            'clips': [
+            'players': [
                 {
-                    'id': c.id,
-                    'title': c.title,
-                    'thumbnail': c.thumbnail_url,
-                    'duration': c.duration_seconds,
-                    'game_date': g.game_date.isoformat() if g.game_date else None,
-                    'opponent': g.opponent,
-                    'event_type': e.event_type.value if e.event_type else None,
-                    'player_id': e.player_id
+                    'id': p.id,
+                    'name': p.full_name,
+                    'birth_year': p.birth_year,
+                    'teams': [
+                        {'id': t.id, 'name': t.name, 'season': t.season}
+                        for t in p.teams
+                    ]
                 }
-                for c, g, e in clips
+                for p in players
             ]
         })
 
-    @app.route('/api/parent/notifications', methods=['GET', 'PUT'])
+    @app.route('/api/user/notifications', methods=['GET', 'PUT'])
     @login_required
     def api_notifications():
         """Get or update notification preferences."""
@@ -338,6 +347,26 @@ def register_parent_routes(app: Flask, db):
             'highlights': user.notify_highlights,
             'game_ready': user.notify_game_ready
         })
+
+
+def _get_player_data(db, player):
+    """Get player data with recent clips and events."""
+    from .models import GameEvent, Clip, Game
+
+    recent_clips = db.query(Clip, Game).join(
+        Game, Clip.game_id == Game.id
+    ).join(
+        GameEvent, Clip.event_id == GameEvent.id
+    ).filter(
+        GameEvent.player_id == player.id
+    ).order_by(Clip.created_at.desc()).limit(5).all()
+
+    return {
+        'player': player,
+        'teams': list(player.teams),
+        'recent_clips': [(c, g) for c, g in recent_clips],
+        'clip_count': len(recent_clips)
+    }
 
 
 # =============================================================================
@@ -370,8 +399,8 @@ LOGIN_HTML = """
 </head>
 <body>
     <div class="login-box">
-        <div class="logo">⚽</div>
-        <div class="tagline">Soccer Rig Parent Portal</div>
+        <div class="logo">Soccer Rig</div>
+        <div class="tagline">Sign in to your account</div>
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="POST">
             <div class="form-group">
@@ -408,19 +437,20 @@ REGISTER_HTML = """
         .form-group { margin-bottom: 1.25rem; }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
         label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #374151; }
-        input { width: 100%; padding: 0.875rem 1rem; border: 2px solid #e2e8f0; border-radius: 0.5rem; font-size: 1rem; }
-        input:focus { outline: none; border-color: #10b981; }
+        input, select { width: 100%; padding: 0.875rem 1rem; border: 2px solid #e2e8f0; border-radius: 0.5rem; font-size: 1rem; background: white; }
+        input:focus, select:focus { outline: none; border-color: #10b981; }
         button { width: 100%; padding: 1rem; background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; }
         .error-list { background: #fee2e2; color: #dc2626; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem; }
         .error-list li { margin-left: 1rem; }
         .login-link { text-align: center; margin-top: 1.5rem; color: #64748b; }
         .login-link a { color: #10b981; font-weight: 600; text-decoration: none; }
+        .user-type-info { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
     </style>
 </head>
 <body>
     <div class="register-box">
-        <div class="logo">⚽</div>
-        <div class="tagline">Create Your Account</div>
+        <div class="logo">Soccer Rig</div>
+        <div class="tagline">Create your account</div>
         {% if errors %}<div class="error-list"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
         <form method="POST">
             <div class="form-row">
@@ -436,6 +466,15 @@ REGISTER_HTML = """
             <div class="form-group">
                 <label>Email</label>
                 <input type="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label>I am a...</label>
+                <select name="user_type">
+                    <option value="parent">Parent / Guardian</option>
+                    <option value="player">Player</option>
+                    <option value="coach">Coach</option>
+                </select>
+                <div class="user-type-info">This helps us personalize your experience</div>
             </div>
             <div class="form-group">
                 <label>Password</label>
@@ -461,7 +500,7 @@ DASHBOARD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Family Dashboard - Soccer Rig</title>
+    <title>Dashboard - Soccer Rig</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f0f4f8; color: #1a202c; min-height: 100vh; }
@@ -470,18 +509,19 @@ DASHBOARD_HTML = """
         .header h1 { font-size: 1.5rem; }
         .header-nav a { color: white; margin-left: 1.5rem; text-decoration: none; opacity: 0.9; }
         .header-nav a:hover { opacity: 1; }
+        .user-badge { background: rgba(255,255,255,0.2); padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.75rem; margin-left: 0.75rem; }
         .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
         .welcome { margin-bottom: 2rem; }
         .welcome h2 { font-size: 1.75rem; margin-bottom: 0.5rem; }
         .welcome p { color: #64748b; }
-        .no-children { background: white; padding: 3rem; border-radius: 1rem; text-align: center; }
-        .no-children h3 { margin-bottom: 1rem; }
-        .no-children p { color: #64748b; margin-bottom: 1.5rem; }
-        .no-children a { background: #10b981; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; }
-        .child-card { background: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-        .child-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem; }
-        .child-name { font-size: 1.25rem; font-weight: 700; }
-        .child-teams { color: #64748b; font-size: 0.875rem; }
+        .no-players { background: white; padding: 3rem; border-radius: 1rem; text-align: center; }
+        .no-players h3 { margin-bottom: 1rem; }
+        .no-players p { color: #64748b; margin-bottom: 1.5rem; }
+        .no-players a { background: #10b981; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; }
+        .player-card { background: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .player-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem; }
+        .player-name { font-size: 1.25rem; font-weight: 700; }
+        .player-teams { color: #64748b; font-size: 0.875rem; }
         .clips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
         .clip-card { background: #f8fafc; border-radius: 0.5rem; overflow: hidden; }
         .clip-thumb { width: 100%; aspect-ratio: 16/9; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 2rem; }
@@ -494,7 +534,7 @@ DASHBOARD_HTML = """
 <body>
     <div class="header">
         <div class="header-content">
-            <h1>⚽ Family Dashboard</h1>
+            <h1>Soccer Rig <span class="user-badge">{{ user.role.value }}</span></h1>
             <nav class="header-nav">
                 <a href="/settings">Settings</a>
                 <a href="/logout">Logout</a>
@@ -504,38 +544,38 @@ DASHBOARD_HTML = """
     <div class="container">
         <div class="welcome">
             <h2>Welcome, {{ user.first_name }}!</h2>
-            <p>View your children's soccer clips and highlights.</p>
+            <p>{% if user.role.value == 'parent' %}View your children's soccer clips and highlights.{% elif user.role.value == 'player' %}View your clips and stats.{% elif user.role.value == 'coach' %}View your team's clips and player stats.{% endif %}</p>
         </div>
 
-        {% if not children %}
-        <div class="no-children">
+        {% if not players %}
+        <div class="no-players">
             <h3>No Players Linked</h3>
-            <p>Connect your TeamSnap account to automatically link your children.</p>
+            <p>{% if user.role.value == 'parent' %}Connect your TeamSnap account to automatically link your children.{% elif user.role.value == 'coach' %}Your team will appear here once configured.{% else %}Your player profile will appear here once linked.{% endif %}</p>
             <a href="/auth/teamsnap">Connect TeamSnap</a>
         </div>
         {% else %}
-            {% for child_data in children %}
-            <div class="child-card">
-                <div class="child-header">
+            {% for player_data in players %}
+            <div class="player-card">
+                <div class="player-header">
                     <div>
-                        <div class="child-name">{{ child_data.player.full_name }}</div>
-                        <div class="child-teams">
-                            {% for team in child_data.teams %}
+                        <div class="player-name">{{ player_data.player.full_name }}</div>
+                        <div class="player-teams">
+                            {% for team in player_data.teams %}
                                 {{ team.name }}{% if not loop.last %}, {% endif %}
                             {% endfor %}
                         </div>
                     </div>
-                    <a href="/player/{{ child_data.player.id }}" class="view-all">View All →</a>
+                    <a href="/player/{{ player_data.player.id }}" class="view-all">View All</a>
                 </div>
 
-                {% if child_data.recent_clips %}
+                {% if player_data.recent_clips %}
                 <div class="clips-grid">
-                    {% for clip, game in child_data.recent_clips %}
+                    {% for clip, game in player_data.recent_clips %}
                     <div class="clip-card">
-                        <div class="clip-thumb">🎬</div>
+                        <div class="clip-thumb">clip</div>
                         <div class="clip-info">
                             <div class="clip-title">{{ clip.title }}</div>
-                            <div class="clip-meta">{{ game.opponent }} • {{ game.game_date.strftime('%b %d') if game.game_date else '' }}</div>
+                            <div class="clip-meta">{{ game.opponent }} - {{ game.game_date.strftime('%b %d') if game.game_date else '' }}</div>
                         </div>
                     </div>
                     {% endfor %}
@@ -574,13 +614,14 @@ SETTINGS_HTML = """
         .checkbox input { width: auto; }
         button { padding: 0.875rem 2rem; background: #10b981; color: white; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; }
         .saved { background: #d1fae5; color: #059669; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem; }
+        .role-badge { display: inline-block; background: #e2e8f0; padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.75rem; color: #64748b; }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="header-content">
-            <h1>⚽ Settings</h1>
-            <a href="/dashboard" style="color: white; text-decoration: none;">← Back to Dashboard</a>
+            <h1>Settings</h1>
+            <a href="/dashboard" style="color: white; text-decoration: none;">Back to Dashboard</a>
         </div>
     </div>
     <div class="container">
@@ -590,7 +631,7 @@ SETTINGS_HTML = """
 
         <form method="POST">
             <div class="card">
-                <h2>Profile</h2>
+                <h2>Profile <span class="role-badge">{{ user.role.value }}</span></h2>
                 <div class="form-row">
                     <div class="form-group">
                         <label>First Name</label>
@@ -600,6 +641,10 @@ SETTINGS_HTML = """
                         <label>Last Name</label>
                         <input type="text" name="last_name" value="{{ user.last_name }}">
                     </div>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" value="{{ user.email }}" disabled>
                 </div>
                 <div class="form-group">
                     <label>Phone</label>
@@ -622,11 +667,11 @@ SETTINGS_HTML = """
                     <label>Notify me when:</label>
                     <div class="checkbox">
                         <input type="checkbox" name="notify_goals" {% if user.notify_goals %}checked{% endif %}>
-                        <span>My child scores a goal</span>
+                        <span>A goal is scored</span>
                     </div>
                     <div class="checkbox">
                         <input type="checkbox" name="notify_saves" {% if user.notify_saves %}checked{% endif %}>
-                        <span>My child makes a save (goalkeepers)</span>
+                        <span>A save is made (goalkeepers)</span>
                     </div>
                     <div class="checkbox">
                         <input type="checkbox" name="notify_highlights" {% if user.notify_highlights %}checked{% endif %}>
@@ -678,9 +723,9 @@ PLAYER_PROFILE_HTML = """
 <body>
     <div class="header">
         <div class="header-content">
-            <a href="/dashboard" style="color: white; opacity: 0.8; text-decoration: none; display: inline-block; margin-bottom: 1rem;">← Back to Dashboard</a>
+            <a href="/dashboard" style="color: white; opacity: 0.8; text-decoration: none; display: inline-block; margin-bottom: 1rem;">Back to Dashboard</a>
             <div class="player-name">{{ player.full_name }}</div>
-            <div class="player-meta">Born {{ player.birth_year }} • {{ player.teams|length }} team(s)</div>
+            <div class="player-meta">Born {{ player.birth_year }} - {{ player.teams|length }} team(s)</div>
         </div>
     </div>
     <div class="container">
@@ -727,10 +772,10 @@ PLAYER_PROFILE_HTML = """
             <div class="clips-grid">
                 {% for clip, game in clips %}
                 <div class="clip-card">
-                    <div class="clip-thumb">🎬</div>
+                    <div class="clip-thumb">clip</div>
                     <div class="clip-info">
                         <div class="clip-title">{{ clip.title }}</div>
-                        <div class="clip-meta">{{ game.opponent }} • {{ game.game_date.strftime('%b %d, %Y') if game.game_date else '' }}</div>
+                        <div class="clip-meta">{{ game.opponent }} - {{ game.game_date.strftime('%b %d, %Y') if game.game_date else '' }}</div>
                     </div>
                 </div>
                 {% endfor %}

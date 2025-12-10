@@ -101,12 +101,8 @@ Player positioning visualization
 - [ ] Per-player and team-wide views
 - [ ] Time-slice filtering
 
-### Parent Purchase Portal
-Buy individual clips/highlights
-- [ ] Stripe/PayPal integration
-- [ ] Clip watermarking for previews
-- [ ] HD download after purchase
-- [ ] Subscription option for full access
+### Parent Purchase Portal - NO CLAUDE. THATS NOT WHY WERE DOING THIS
+
 
 ### AI Commentary
 Auto-generate play-by-play narration
@@ -115,12 +111,8 @@ Auto-generate play-by-play narration
 - [ ] Multiple voice options
 - [ ] Real-time vs post-game modes
 
-### Referee Incident Review
-Slow-mo, multiple angles for disputed calls
-- [ ] Frame-by-frame scrubbing
-- [ ] Synchronized multi-angle view
-- [ ] Timestamp bookmarking
-- [ ] Export incident report
+### Referee Incident Review - NO CLAUDE. REFS DONT LOSE GAMES. LACK OF PREPARATION DOES
+
 
 ---
 

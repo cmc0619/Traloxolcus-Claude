@@ -76,10 +76,17 @@ class TeamSnapTeam:
     """Team information from TeamSnap."""
     id: int
     name: str
-    sport: str
+    sport_id: int  # 2 = Soccer
     division_name: Optional[str] = None
     season_name: Optional[str] = None
+    league_name: Optional[str] = None
+    time_zone: Optional[str] = None
+    raw_data: Optional[Dict] = None  # Store full API response for JSONB
     players: List[TeamSnapPlayer] = field(default_factory=list)
+
+    @property
+    def is_soccer(self) -> bool:
+        return self.sport_id == 2
 
 
 @dataclass
@@ -234,8 +241,17 @@ class TeamSnapClient:
             token = self.refresh_token(token)
         return self._api_request(token.access_token, '/me')
 
-    def get_teams(self, token: TeamSnapToken) -> List[TeamSnapTeam]:
-        """Get all teams the user has access to."""
+    def get_teams(self, token: TeamSnapToken, soccer_only: bool = True) -> List[TeamSnapTeam]:
+        """
+        Get all teams the user has access to.
+
+        Args:
+            token: OAuth token
+            soccer_only: If True, only return soccer teams (sport_id=2)
+
+        Returns:
+            List of TeamSnapTeam objects
+        """
         if token.is_expired:
             token = self.refresh_token(token)
 
@@ -248,14 +264,26 @@ class TeamSnapClient:
         teams = []
         for item in data.get('collection', {}).get('items', []):
             team_data = {d['name']: d['value'] for d in item['data']}
+
+            sport_id = team_data.get('sport_id', 0)
+
+            # Filter to soccer only (sport_id = 2)
+            if soccer_only and sport_id != 2:
+                logger.debug(f"Skipping non-soccer team: {team_data.get('name')} (sport_id={sport_id})")
+                continue
+
             teams.append(TeamSnapTeam(
                 id=team_data['id'],
                 name=team_data['name'],
-                sport=team_data.get('sport_id', 'soccer'),
+                sport_id=sport_id,
                 division_name=team_data.get('division_name'),
-                season_name=team_data.get('season_name')
+                season_name=team_data.get('season_name'),
+                league_name=team_data.get('league_name'),
+                time_zone=team_data.get('time_zone_iana_name'),
+                raw_data=team_data  # Store full response for JSONB
             ))
 
+        logger.info(f"Found {len(teams)} soccer teams (filtered from API response)")
         return teams
 
     def get_roster(self, token: TeamSnapToken, team_id: int) -> List[TeamSnapPlayer]:
@@ -409,7 +437,8 @@ class TeamSnapSyncService:
                 name=ts_team.name,
                 team_code=team_code,
                 season=ts_team.season_name,
-                teamsnap_team_id=ts_team.id
+                teamsnap_team_id=ts_team.id,
+                teamsnap_data=ts_team.raw_data  # Store full API response in JSONB
             )
             self.db.add(team)
             self.db.flush()
@@ -419,6 +448,7 @@ class TeamSnapSyncService:
             # Update team info
             team.name = ts_team.name
             team.season = ts_team.season_name
+            team.teamsnap_data = ts_team.raw_data  # Update JSONB on sync
 
         team.teamsnap_last_sync = datetime.utcnow()
 
@@ -982,6 +1012,194 @@ def register_teamsnap_routes(app, db):
         from flask import render_template_string
 
         return render_template_string(DATA_EXPLORER_HTML)
+
+    # -------------------------------------------------------------------------
+    # Advanced JSONB Query API - PostgreSQL-specific features
+    # -------------------------------------------------------------------------
+
+    @app.route('/api/data/query/teams-by-league')
+    def api_teams_by_league():
+        """
+        Query teams by league using JSONB containment.
+
+        PostgreSQL JSONB feature: @> operator for containment
+        Example: teamsnap_data @> '{"league_name": "Cherry Hill Soccer Club"}'
+        """
+        from ..models import Team
+        from sqlalchemy import text
+
+        league = request.args.get('league')
+        if not league:
+            return jsonify({'error': 'league parameter required'}), 400
+
+        # Use JSONB containment operator @>
+        teams = db.query(Team).filter(
+            Team.teamsnap_data['league_name'].astext == league
+        ).all()
+
+        return jsonify({
+            'query': f"league_name = {league}",
+            'count': len(teams),
+            'teams': [
+                {
+                    'id': t.id,
+                    'name': t.name,
+                    'league': t.teamsnap_data.get('league_name') if t.teamsnap_data else None,
+                    'division': t.teamsnap_data.get('division_name') if t.teamsnap_data else None
+                }
+                for t in teams
+            ]
+        })
+
+    @app.route('/api/data/query/teams-by-division')
+    def api_teams_by_division():
+        """
+        Query teams by division pattern using JSONB text search.
+
+        PostgreSQL JSONB feature: ->> extracts as text for LIKE/ILIKE
+        """
+        from ..models import Team
+
+        pattern = request.args.get('pattern', '')
+
+        # Use JSONB ->> to extract text, then ILIKE for pattern match
+        teams = db.query(Team).filter(
+            Team.teamsnap_data['division_name'].astext.ilike(f'%{pattern}%')
+        ).all()
+
+        return jsonify({
+            'query': f"division_name ILIKE '%{pattern}%'",
+            'count': len(teams),
+            'teams': [
+                {
+                    'id': t.id,
+                    'name': t.name,
+                    'division': t.teamsnap_data.get('division_name') if t.teamsnap_data else None
+                }
+                for t in teams
+            ]
+        })
+
+    @app.route('/api/data/query/teams-stats')
+    def api_teams_jsonb_stats():
+        """
+        Aggregate stats from JSONB data using PostgreSQL functions.
+
+        PostgreSQL JSONB features:
+        - jsonb_object_keys() - get all keys
+        - jsonb_array_length() - count array items
+        - Casting with ::int for numeric operations
+        """
+        from ..models import Team
+        from sqlalchemy import func, text
+
+        # Get all teams with JSONB data
+        teams = db.query(Team).filter(Team.teamsnap_data.isnot(None)).all()
+
+        # Aggregate by league using Python (could also use SQL GROUP BY)
+        leagues = {}
+        divisions = {}
+        timezones = {}
+
+        for team in teams:
+            data = team.teamsnap_data or {}
+
+            league = data.get('league_name', 'Unknown')
+            leagues[league] = leagues.get(league, 0) + 1
+
+            division = data.get('division_name', 'Unknown')
+            divisions[division] = divisions.get(division, 0) + 1
+
+            tz = data.get('time_zone_iana_name', 'Unknown')
+            timezones[tz] = timezones.get(tz, 0) + 1
+
+        return jsonify({
+            'total_teams': len(teams),
+            'by_league': dict(sorted(leagues.items(), key=lambda x: -x[1])),
+            'by_division': dict(sorted(divisions.items(), key=lambda x: -x[1])),
+            'by_timezone': dict(sorted(timezones.items(), key=lambda x: -x[1]))
+        })
+
+    @app.route('/api/data/query/raw-jsonb')
+    def api_raw_jsonb_query():
+        """
+        Execute a raw JSONB path query.
+
+        PostgreSQL JSONB features:
+        - ? operator: key exists
+        - ?| operator: any key exists
+        - ?& operator: all keys exist
+        - #> operator: path extraction
+        - @> operator: containment
+
+        Example: /api/data/query/raw-jsonb?path=league_name
+        """
+        from ..models import Team
+        from sqlalchemy import text
+
+        path = request.args.get('path')
+        value = request.args.get('value')
+
+        if not path:
+            return jsonify({
+                'error': 'path parameter required',
+                'examples': [
+                    '/api/data/query/raw-jsonb?path=league_name',
+                    '/api/data/query/raw-jsonb?path=league_name&value=Cherry Hill',
+                    '/api/data/query/raw-jsonb?path=is_retired&value=false'
+                ]
+            }), 400
+
+        # Build query based on parameters
+        if value:
+            # Filter by path = value
+            teams = db.query(Team).filter(
+                Team.teamsnap_data[path].astext == value
+            ).all()
+        else:
+            # Just extract the path values
+            teams = db.query(Team).filter(
+                Team.teamsnap_data.isnot(None)
+            ).all()
+
+        # Extract requested field from each team
+        results = []
+        for t in teams:
+            if t.teamsnap_data:
+                results.append({
+                    'team_id': t.id,
+                    'team_name': t.name,
+                    path: t.teamsnap_data.get(path)
+                })
+
+        return jsonify({
+            'query': f"teamsnap_data->>'{path}'" + (f" = '{value}'" if value else ''),
+            'count': len(results),
+            'results': results
+        })
+
+    @app.route('/api/data/query/teams-with-field')
+    def api_teams_with_field():
+        """
+        Find teams where a specific JSONB field exists.
+
+        PostgreSQL JSONB feature: ? operator for key existence
+        """
+        from ..models import Team
+        from sqlalchemy import text
+
+        field = request.args.get('field', 'league_name')
+
+        # Use ? operator for key existence check
+        teams = db.query(Team).filter(
+            text(f"teamsnap_data ? :field")
+        ).params(field=field).all()
+
+        return jsonify({
+            'query': f"teamsnap_data ? '{field}'",
+            'count': len(teams),
+            'teams': [{'id': t.id, 'name': t.name} for t in teams]
+        })
 
 
 # =============================================================================

@@ -293,6 +293,7 @@ class Team(Base):
     # TeamSnap
     teamsnap_team_id = Column(Integer, index=True)
     teamsnap_last_sync = Column(DateTime)
+    teamsnap_data = Column(JSONB)  # Raw API response for advanced queries
 
     # Status
     is_active = Column(Boolean, default=True)

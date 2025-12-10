@@ -287,7 +287,16 @@ class TeamSnapClient:
         return teams
 
     def get_roster(self, token: TeamSnapToken, team_id: int) -> List[TeamSnapPlayer]:
-        """Get full roster for a team including contact info."""
+        """
+        Get full roster for a team.
+
+        Per TEAMSNAP_SCHEMA.md, Member fields:
+        - id, first_name, last_name, jersey_number (string!)
+        - is_coach, is_owner, is_manager (use these to filter non-players)
+        - email_addresses (list[str] - directly on member, not separate endpoint)
+        - phone_numbers (list - directly on member)
+        - birthday (string, often empty)
+        """
         if token.is_expired:
             token = self.refresh_token(token)
 
@@ -301,63 +310,46 @@ class TeamSnapClient:
         for item in members_data.get('collection', {}).get('items', []):
             member = {d['name']: d['value'] for d in item['data']}
 
-            # Skip non-players (coaches, managers)
-            if member.get('is_non_player', False):
+            # Skip coaches/managers/owners - per schema these are the actual fields
+            if member.get('is_coach', False) or \
+               member.get('is_manager', False) or \
+               member.get('is_owner', False):
+                logger.debug(f"Skipping non-player: {member.get('first_name')} {member.get('last_name')}")
                 continue
 
-            # Get contact info
-            member_id = member['id']
-            contacts = self._get_member_contacts(token, member_id)
+            # Email addresses are directly on member (list of strings per schema)
+            email_addresses = member.get('email_addresses', [])
+            if isinstance(email_addresses, str):
+                email_addresses = [email_addresses] if email_addresses else []
 
-            # Determine position
-            position = member.get('position')
-            is_gk = position and 'goal' in position.lower() if position else False
+            # Phone numbers directly on member (list per schema)
+            phone_numbers = member.get('phone_numbers', [])
+            if isinstance(phone_numbers, str):
+                phone_numbers = [phone_numbers] if phone_numbers else []
+
+            # jersey_number is STRING per schema - keep as-is
+            jersey = member.get('jersey_number')
+
+            # Note: 'position' is NOT in the schema - we can't determine goalkeeper from API
+            # Would need to infer from jersey number convention or manual tagging
 
             players.append(TeamSnapPlayer(
-                id=member_id,
+                id=member['id'],
                 first_name=member.get('first_name', ''),
                 last_name=member.get('last_name', ''),
-                jersey_number=member.get('jersey_number'),
-                position=position,
-                is_goalkeeper=is_gk,
-                email_addresses=contacts.get('emails', []),
-                phone_numbers=contacts.get('phones', []),
-                birthday=member.get('birthday')
+                jersey_number=jersey,  # String per schema
+                position=None,  # Not available in API
+                is_goalkeeper=False,  # Can't determine from API
+                email_addresses=email_addresses,
+                phone_numbers=phone_numbers,
+                birthday=member.get('birthday', '')  # Often empty string
             ))
 
+        logger.info(f"Fetched {len(players)} players for team {team_id}")
         return players
 
-    def _get_member_contacts(self, token: TeamSnapToken, member_id: int) -> Dict:
-        """Get email and phone contacts for a member (including parents)."""
-        try:
-            data = self._api_request(
-                token.access_token,
-                '/contact_email_addresses',
-                params={'member_id': member_id}
-            )
-
-            emails = []
-            for item in data.get('collection', {}).get('items', []):
-                contact = {d['name']: d['value'] for d in item['data']}
-                if contact.get('email'):
-                    emails.append(contact['email'])
-
-            phone_data = self._api_request(
-                token.access_token,
-                '/contact_phone_numbers',
-                params={'member_id': member_id}
-            )
-
-            phones = []
-            for item in phone_data.get('collection', {}).get('items', []):
-                contact = {d['name']: d['value'] for d in item['data']}
-                if contact.get('phone_number'):
-                    phones.append(contact['phone_number'])
-
-            return {'emails': emails, 'phones': phones}
-        except Exception as e:
-            logger.warning(f"Failed to get contacts for member {member_id}: {e}")
-            return {'emails': [], 'phones': []}
+    # Note: _get_member_contacts removed - email_addresses and phone_numbers
+    # are directly on the Member object per TEAMSNAP_SCHEMA.md
 
 
 # =============================================================================
@@ -476,7 +468,12 @@ class TeamSnapSyncService:
         }
 
     def _sync_player(self, user, team, ts_player: TeamSnapPlayer) -> Dict:
-        """Sync a player and link to team with jersey number."""
+        """
+        Sync a player and link to team with jersey number.
+
+        Note: Per TEAMSNAP_SCHEMA.md, 'position' is NOT available from TeamSnap API.
+        Position must be set manually or inferred from jersey number conventions.
+        """
         from ..models import Player, team_player, parent_player, PlayerPosition
         from sqlalchemy import and_, insert, update
 
@@ -497,16 +494,11 @@ class TeamSnapSyncService:
             ).first()
 
         if not player:
-            # Create new player
-            position = PlayerPosition.GOALKEEPER if ts_player.is_goalkeeper else PlayerPosition.UNKNOWN
-            if ts_player.position:
-                pos_lower = ts_player.position.lower()
-                if 'forward' in pos_lower or 'striker' in pos_lower:
-                    position = PlayerPosition.FORWARD
-                elif 'mid' in pos_lower:
-                    position = PlayerPosition.MIDFIELDER
-                elif 'defend' in pos_lower or 'back' in pos_lower:
-                    position = PlayerPosition.DEFENDER
+            # Create new player - position not available from TeamSnap API
+            # Could infer goalkeeper from jersey_number == "1" or "0" convention
+            position = PlayerPosition.UNKNOWN
+            if ts_player.jersey_number in ('0', '1', '00'):
+                position = PlayerPosition.GOALKEEPER  # Common GK numbers
 
             player = Player(
                 first_name=ts_player.first_name,
@@ -525,6 +517,7 @@ class TeamSnapSyncService:
                 player.teamsnap_member_id = ts_player.id
 
         # Link player to team with jersey number (per-team)
+        # Note: position stored as NULL since TeamSnap doesn't provide it
         existing_link = self.db.execute(
             team_player.select().where(
                 and_(
@@ -539,8 +532,8 @@ class TeamSnapSyncService:
                 team_player.insert().values(
                     team_id=team.id,
                     player_id=player.id,
-                    jersey_number=ts_player.jersey_number,
-                    position=ts_player.position,
+                    jersey_number=ts_player.jersey_number,  # String per schema
+                    position=None,  # Not available from TeamSnap
                     is_active=True
                 )
             )
@@ -553,8 +546,8 @@ class TeamSnapSyncService:
                         team_player.c.player_id == player.id
                     )
                 ).values(
-                    jersey_number=ts_player.jersey_number,
-                    position=ts_player.position
+                    jersey_number=ts_player.jersey_number
+                    # Don't update position - would overwrite manual assignment
                 )
             )
 

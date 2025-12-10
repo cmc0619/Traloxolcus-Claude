@@ -362,7 +362,7 @@ class TeamSnapSyncService:
         if not user or not user.teamsnap_token:
             return {'error': 'User not connected to TeamSnap'}
 
-        token = TeamSnapToken.from_dict(eval(user.teamsnap_token))  # TODO: proper encryption
+        token = TeamSnapToken.from_dict(user.teamsnap_token)  # JSONB stores dict natively
 
         try:
             ts_teams = self.client.get_teams(token)
@@ -627,7 +627,7 @@ def register_teamsnap_routes(app, db):
 
             # Store token on user
             user = db.query(User).get(user_id)
-            user.teamsnap_token = str(token.to_dict())
+            user.teamsnap_token = token.to_dict()  # JSONB stores dict natively
             user.teamsnap_user_id = token.user_id
             db.commit()
 

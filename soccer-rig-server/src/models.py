@@ -94,7 +94,7 @@ parent_player = Table(
     Base.metadata,
     Column('parent_id', Integer, ForeignKey('users.id'), primary_key=True),
     Column('player_id', Integer, ForeignKey('players.id'), primary_key=True),
-    Column('relationship', String(50), default='parent'),  # parent, guardian, etc.
+    Column('relationship', String(50), default='parent'),  # parent, guardian, grandparent, family
     Column('created_at', DateTime, default=datetime.utcnow)
 )
 
@@ -117,6 +117,16 @@ team_coach = Table(
     Column('team_id', Integer, ForeignKey('teams.id'), primary_key=True),
     Column('user_id', Integer, ForeignKey('users.id'), primary_key=True),
     Column('role', String(50), default='head_coach'),  # head_coach, assistant, manager
+    Column('created_at', DateTime, default=datetime.utcnow)
+)
+
+# Users can follow multiple teams (direct team access without player link)
+user_team = Table(
+    'user_team',
+    Base.metadata,
+    Column('user_id', Integer, ForeignKey('users.id'), primary_key=True),
+    Column('team_id', Integer, ForeignKey('teams.id'), primary_key=True),
+    Column('role', String(50), default='follower'),  # follower, team_parent, manager
     Column('created_at', DateTime, default=datetime.utcnow)
 )
 
@@ -148,7 +158,7 @@ class User(Base):
     notify_game_ready = Column(Boolean, default=True)
 
     # TeamSnap integration
-    teamsnap_token = Column(Text)  # Encrypted OAuth token
+    teamsnap_token = Column(JSONB)  # OAuth token data (access_token, refresh_token, expires_at)
     teamsnap_user_id = Column(Integer)
 
     # Timestamps
@@ -159,6 +169,7 @@ class User(Base):
     # Relationships
     children = relationship('Player', secondary=parent_player, back_populates='parents')
     coached_teams = relationship('Team', secondary=team_coach, back_populates='coaches')
+    followed_teams = relationship('Team', secondary=user_team, back_populates='followers')
 
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
@@ -291,6 +302,7 @@ class Team(Base):
     organization = relationship('Organization', back_populates='teams')
     players = relationship('Player', secondary=team_player, back_populates='teams')
     coaches = relationship('User', secondary=team_coach, back_populates='coached_teams')
+    followers = relationship('User', secondary=user_team, back_populates='followed_teams')
     games = relationship('Game', back_populates='team')
 
     @property

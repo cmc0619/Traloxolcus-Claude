@@ -416,7 +416,7 @@ class GameEvent(Base):
 
     # Additional context
     description = Column(String(500))  # "Goal by #7 - Marcus Johnson"
-    metadata = Column(JSONB)  # Extra data from ML
+    event_metadata = Column(JSONB)  # Extra data from ML
 
     # Verification
     is_verified = Column(Boolean, default=False)  # Coach verified

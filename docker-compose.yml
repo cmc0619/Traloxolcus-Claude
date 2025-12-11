@@ -1,8 +1,6 @@
 # Multi-Camera Soccer Recording System
 # Docker Compose Configuration
 
-version: '3.8'
-
 services:
   # ==========================================================================
   # Viewer Server (VPS) - End user portal with SSL
@@ -13,8 +11,7 @@ services:
       dockerfile: Dockerfile
     container_name: soccer-viewer
     ports:
-      - "80:80"
-      - "443:443"
+      - "7420:443"   # HTTPS only
     environment:
       - DATABASE_URL=postgresql://soccer:soccer@db:5432/soccer_rig
       - FLASK_ENV=production
@@ -35,17 +32,17 @@ services:
       - soccer-net
 
   # ==========================================================================
-  # Processing Server (Home GPU) - No SSL needed
+  # Processing Server (Home GPU) - HTTP only
   # ==========================================================================
   processing:
     build:
       context: ./processing-server
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.cpu  # Use CPU-only version; switch to Dockerfile for GPU
     container_name: soccer-processing
     ports:
-      - "5100:5100"
+      - "7421:5100"   # HTTP on port 7421
     environment:
-      - VIEWER_URL=${VIEWER_URL:-https://localhost}
+      - VIEWER_URL=${VIEWER_URL:-https://localhost:7420}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
@@ -54,13 +51,14 @@ services:
     volumes:
       - processing_input:/app/input
       - processing_output:/app/output
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # Uncomment below for GPU support (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
     restart: unless-stopped
     networks:
       - soccer-net

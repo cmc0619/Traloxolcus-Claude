@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bench - Processing Server Status</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/status.css') }}">
+    <meta http-equiv="refresh" content="10">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>⚽ Bench</h1>
+            <p class="subtitle">Processing Server Status</p>
+            <div class="health-badge" id="health-badge">Checking...</div>
+        </header>
+
+        <!-- Current Job -->
+        <section class="card" id="current-job">
+            <h2>🎬 Current Job</h2>
+            <div class="job-content" id="current-job-content">
+                <p class="empty-state">No active job</p>
+            </div>
+        </section>
+
+        <!-- Queue -->
+        <section class="card">
+            <h2>📋 Queue <span class="badge" id="queue-count">0</span></h2>
+            <div class="job-list" id="queue-list">
+                <p class="empty-state">Queue empty</p>
+            </div>
+        </section>
+
+        <!-- System Stats -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">🖥️</div>
+                <div class="stat-value" id="cpu-usage">--</div>
+                <div class="stat-label">CPU Usage</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">💾</div>
+                <div class="stat-value" id="memory-usage">--</div>
+                <div class="stat-label">Memory</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">💿</div>
+                <div class="stat-value" id="disk-usage">--</div>
+                <div class="stat-label">Disk</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">⏱️</div>
+                <div class="stat-value" id="uptime">--</div>
+                <div class="stat-label">Uptime</div>
+            </div>
+        </section>
+
+        <!-- GPU Status -->
+        <section class="card" id="gpu-section">
+            <h2>🎮 GPU Status</h2>
+            <div id="gpu-content">
+                <p class="empty-state">Loading...</p>
+            </div>
+        </section>
+
+        <!-- Recent Jobs -->
+        <section class="card">
+            <h2>✅ Recent Jobs</h2>
+            <div class="job-list" id="recent-list">
+                <p class="empty-state">No completed jobs</p>
+            </div>
+        </section>
+
+        <footer class="footer">
+            <p>Last updated: <span id="last-update">--</span></p>
+        </footer>
+    </div>
+
+    <script>
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                updateUI(data);
+            } catch (error) {
+                console.error('Failed to fetch status:', error);
+                document.getElementById('health-badge').textContent = 'Error';
+                document.getElementById('health-badge').className = 'health-badge error';
+            }
+        }
+
+        function updateUI(data) {
+            // Health badge
+            const healthBadge = document.getElementById('health-badge');
+            if (data.gpu?.available) {
+                healthBadge.textContent = 'Healthy';
+                healthBadge.className = 'health-badge healthy';
+            } else {
+                healthBadge.textContent = 'Degraded';
+                healthBadge.className = 'health-badge warning';
+            }
+
+            // System stats
+            if (data.system) {
+                document.getElementById('cpu-usage').textContent = data.system.cpu_percent + '%';
+                document.getElementById('memory-usage').textContent =
+                    `${data.system.memory.used_gb}/${data.system.memory.total_gb} GB`;
+                document.getElementById('disk-usage').textContent =
+                    `${data.system.disk.percent}%`;
+            }
+
+            // GPU
+            const gpuContent = document.getElementById('gpu-content');
+            if (data.gpu?.available && data.gpu.gpus?.length > 0) {
+                gpuContent.innerHTML = data.gpu.gpus.map(gpu => `
+                    <div class="gpu-card">
+                        <div class="gpu-name">${gpu.name}</div>
+                        <div class="gpu-stats">
+                            <div class="gpu-stat">
+                                <span class="label">Utilization</span>
+                                <span class="value">${gpu.utilization_percent}%</span>
+                                <div class="progress-bar">
+                                    <div class="progress" style="width: ${gpu.utilization_percent}%"></div>
+                                </div>
+                            </div>
+                            <div class="gpu-stat">
+                                <span class="label">Memory</span>
+                                <span class="value">${gpu.memory_used_mb}/${gpu.memory_total_mb} MB</span>
+                                <div class="progress-bar">
+                                    <div class="progress" style="width: ${(gpu.memory_used_mb/gpu.memory_total_mb*100).toFixed(0)}%"></div>
+                                </div>
+                            </div>
+                            <div class="gpu-stat">
+                                <span class="label">Temperature</span>
+                                <span class="value ${gpu.temperature_c > 80 ? 'hot' : ''}">${gpu.temperature_c}°C</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                gpuContent.innerHTML = `<p class="warning">⚠️ ${data.gpu?.error || 'GPU not available'}</p>`;
+            }
+
+            // Current job
+            const currentContent = document.getElementById('current-job-content');
+            if (data.queue?.current) {
+                const job = data.queue.current;
+                currentContent.innerHTML = `
+                    <div class="job-item processing">
+                        <div class="job-id">${job.id || 'Unknown'}</div>
+                        <div class="job-type">${job.type || 'Processing'}</div>
+                        <div class="job-started">Started: ${job.started_at || '--'}</div>
+                        <div class="job-progress">
+                            <div class="spinner"></div>
+                            Processing...
+                        </div>
+                    </div>
+                `;
+            } else {
+                currentContent.innerHTML = '<p class="empty-state">No active job</p>';
+            }
+
+            // Queue
+            document.getElementById('queue-count').textContent = data.queue?.pending || 0;
+            const queueList = document.getElementById('queue-list');
+            if (data.queue?.jobs?.length > 0) {
+                queueList.innerHTML = data.queue.jobs.map((job, i) => `
+                    <div class="job-item pending">
+                        <div class="job-position">#${i + 1}</div>
+                        <div class="job-id">${job.id || 'Unknown'}</div>
+                        <div class="job-type">${job.type || 'Pending'}</div>
+                        <div class="job-queued">Queued: ${job.queued_at || '--'}</div>
+                    </div>
+                `).join('');
+            } else {
+                queueList.innerHTML = '<p class="empty-state">Queue empty</p>';
+            }
+
+            // Recent jobs
+            const recentList = document.getElementById('recent-list');
+            if (data.recent?.length > 0) {
+                recentList.innerHTML = data.recent.reverse().map(job => `
+                    <div class="job-item ${job.status}">
+                        <div class="job-status">${job.status === 'completed' ? '✅' : '❌'}</div>
+                        <div class="job-id">${job.id || 'Unknown'}</div>
+                        <div class="job-type">${job.type || '--'}</div>
+                        <div class="job-completed">Completed: ${job.completed_at || '--'}</div>
+                    </div>
+                `).join('');
+            } else {
+                recentList.innerHTML = '<p class="empty-state">No completed jobs</p>';
+            }
+
+            // Last update
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+        }
+
+        // Fetch immediately and then every 5 seconds
+        fetchStatus();
+        setInterval(fetchStatus, 5000);
+    </script>
+</body>
+</html>

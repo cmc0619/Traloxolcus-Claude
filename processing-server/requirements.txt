@@ -1,8 +1,12 @@
-# Soccer Rig Processing Server Dependencies
+# Soccer Rig Processing Server (Bench) Dependencies
 
 # Web framework
 flask>=2.3.0
 requests>=2.31.0
+gunicorn>=22.0.0  # CVE-2024-1135, CVE-2024-6827 fixed in 22.0.0
+
+# System monitoring (for status page)
+psutil>=5.9.0
 
 # Configuration
 pyyaml>=6.0

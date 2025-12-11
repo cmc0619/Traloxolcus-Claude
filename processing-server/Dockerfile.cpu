@@ -1,0 +1,39 @@
+# Soccer Rig Processing Server
+# CPU-only version (no GPU required)
+
+FROM python:3.11-slim
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install FFmpeg and OpenCV dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install PyTorch CPU-only version
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Copy application
+COPY . .
+
+# Create directories
+RUN mkdir -p /app/input /app/output /app/models
+
+# Download YOLO model on build
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+
+EXPOSE 5100
+
+CMD ["python", "-m", "gunicorn", "--bind", "0.0.0.0:5100", "--workers", "2", "--timeout", "300", "src.processing_server:create_app()"]

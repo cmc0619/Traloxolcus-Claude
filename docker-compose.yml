@@ -1,0 +1,125 @@
+# Multi-Camera Soccer Recording System
+# Docker Compose Configuration
+
+services:
+  # ==========================================================================
+  # Viewer Server (VPS) - End user portal with SSL
+  # ==========================================================================
+  viewer:
+    build:
+      context: ./soccer-rig-server
+      dockerfile: Dockerfile
+    container_name: soccer-viewer
+    ports:
+      - "7420:443"   # HTTPS only
+    environment:
+      - DATABASE_URL=postgresql://soccer:soccer@db:5432/soccer_rig
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - TEAMSNAP_CLIENT_ID=${TEAMSNAP_CLIENT_ID:-}
+      - TEAMSNAP_CLIENT_SECRET=${TEAMSNAP_CLIENT_SECRET:-}
+      - SSL_MODE=${SSL_MODE:-self-signed}  # self-signed or letsencrypt
+      - DOMAIN=${DOMAIN:-localhost}
+      - PROCESSING_URL=http://processing:5100
+    volumes:
+      - video_storage:/app/storage
+      - ssl_certs:/etc/letsencrypt
+      - ./soccer-rig-server/web:/app/web:ro
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    networks:
+      - soccer-net
+
+  # ==========================================================================
+  # Processing Server (Home GPU) - HTTP only
+  # ==========================================================================
+  processing:
+    build:
+      context: ./processing-server
+      dockerfile: Dockerfile.cpu  # Use CPU-only version; switch to Dockerfile for GPU
+    container_name: soccer-processing
+    ports:
+      - "7421:5100"   # HTTP on port 7421
+    environment:
+      - VIEWER_URL=${VIEWER_URL:-https://localhost:7420}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - EMAIL_FROM=${EMAIL_FROM:-noreply@soccer-rig.local}
+    volumes:
+      - processing_input:/app/input
+      - processing_output:/app/output
+    # Uncomment below for GPU support (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - soccer-net
+
+  # ==========================================================================
+  # PostgreSQL Database
+  # ==========================================================================
+  db:
+    image: postgres:16-alpine
+    container_name: soccer-db
+    ports:
+      - "5436:5432"
+    environment:
+      - POSTGRES_USER=soccer
+      - POSTGRES_PASSWORD=soccer
+      - POSTGRES_DB=soccer_rig
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - soccer-net
+
+  # ==========================================================================
+  # Redis (for Celery task queue)
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: soccer-redis
+    restart: unless-stopped
+    networks:
+      - soccer-net
+
+  # ==========================================================================
+  # Celery Worker (async video processing)
+  # ==========================================================================
+  celery:
+    build:
+      context: ./soccer-rig-server
+      dockerfile: Dockerfile
+    container_name: soccer-celery
+    command: celery -A app.celery worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://soccer:soccer@db:5432/soccer_rig
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - video_storage:/app/storage
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    networks:
+      - soccer-net
+
+volumes:
+  postgres_data:
+  video_storage:
+  processing_input:
+  processing_output:
+  ssl_certs:
+
+networks:
+  soccer-net:
+    driver: bridge

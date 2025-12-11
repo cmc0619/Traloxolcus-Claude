@@ -3,7 +3,7 @@
 # Web Framework
 flask>=3.0.0
 flask-cors>=4.0.0
-gunicorn>=21.0.0
+gunicorn>=22.0.0  # CVE-2024-1135, CVE-2024-6827 fixed in 22.0.0
 
 # Database
 sqlalchemy>=2.0.0
@@ -33,6 +33,9 @@ redis>=5.0.0
 requests>=2.31.0
 httpx>=0.25.0
 
+# TeamSnap integration
+# teamsnappier>=1.0.0  # Alternative: use our built-in client
+
 # Configuration
 pyyaml>=6.0.0
 python-dotenv>=1.0.0
@@ -40,6 +43,7 @@ python-dotenv>=1.0.0
 # Utilities
 python-dateutil>=2.8.0
 humanize>=4.9.0
+psutil>=5.9.0  # System monitoring for admin health endpoint
 
 # Logging
 structlog>=24.0.0

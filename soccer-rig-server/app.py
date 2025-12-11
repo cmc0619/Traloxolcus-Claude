@@ -103,6 +103,60 @@ def create_app():
             'processing_server': processing_url or 'not configured'
         }
 
+    # ==========================================================================
+    # API v1 Endpoints (for dashboard frontend)
+    # ==========================================================================
+    from src.models import Game, Recording, Team
+
+    @app.route('/api/v1/stats')
+    def api_stats():
+        """Dashboard statistics."""
+        try:
+            session = db()
+            total_games = session.query(Game).count()
+            total_recordings = session.query(Recording).count()
+            total_teams = session.query(Team).count()
+            session.close()
+            return {
+                'total_sessions': total_games,
+                'total_recordings': total_recordings,
+                'total_teams': total_teams,
+                'storage_used_gb': 0,
+                'processing_queue': 0
+            }
+        except Exception as e:
+            logger.error(f"Stats error: {e}")
+            return {'total_sessions': 0, 'total_recordings': 0, 'storage_used_gb': 0}
+
+    @app.route('/api/v1/sessions')
+    def api_sessions():
+        """List recording sessions (games)."""
+        from flask import request
+        try:
+            session = db()
+            limit = request.args.get('limit', 50, type=int)
+            games = session.query(Game).order_by(Game.created_at.desc()).limit(limit).all()
+            result = {
+                'sessions': [
+                    {
+                        'id': g.session_id or str(g.id),
+                        'name': f"{g.team.name if g.team else 'Unknown'} vs {g.opponent or 'Unknown'}",
+                        'created_at': g.created_at.isoformat() if g.created_at else None,
+                        'game_date': g.game_date.isoformat() if g.game_date else None,
+                        'complete': g.is_processed,
+                        'stitched': bool(g.panorama_url),
+                        'recordings': {}
+                    }
+                    for g in games
+                ],
+                'count': len(games)
+            }
+            session.close()
+            return result
+        except Exception as e:
+            logger.error(f"Sessions error: {e}")
+            return {'sessions': [], 'count': 0}
+
     logger.info("Soccer Rig Viewer Server initialized")
     return app
 

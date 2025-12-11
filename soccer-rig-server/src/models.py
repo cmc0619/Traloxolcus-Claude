@@ -351,6 +351,10 @@ class Game(Base):
     # Metadata from processing
     metadata = Column(JSONB)  # Flexible JSON for extra data
 
+    # TeamSnap integration
+    teamsnap_event_id = Column(Integer, index=True)  # TeamSnap event/game ID
+    teamsnap_data = Column(JSONB)  # Raw TeamSnap API response
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

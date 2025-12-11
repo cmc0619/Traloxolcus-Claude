@@ -90,6 +90,44 @@ class TeamSnapTeam:
 
 
 @dataclass
+class TeamSnapGame:
+    """
+    Game/Event information from TeamSnap.
+
+    Per TEAMSNAP_SCHEMA.md, Event fields:
+    - id, team_id, is_game (distinguishes games from practices)
+    - game_type ("Home" or "Away")
+    - start_date, opponent_name, location_name
+    - points_for_team, points_for_opponent (scores)
+    - is_canceled, formatted_title
+    """
+    id: int
+    team_id: int
+    is_game: bool  # True = game, False = practice/event
+    game_type: str  # "Home" or "Away"
+    start_date: Optional[datetime] = None
+    opponent_name: Optional[str] = None
+    location_name: Optional[str] = None
+    location_details: Optional[str] = None  # additional_location_details
+    points_for_team: Optional[int] = None
+    points_for_opponent: Optional[int] = None
+    formatted_title: Optional[str] = None
+    is_canceled: bool = False
+    uniform: Optional[str] = None
+    raw_data: Optional[Dict] = None  # Store full API response for JSONB
+
+    @property
+    def is_home(self) -> bool:
+        return self.game_type == "Home"
+
+    @property
+    def full_location(self) -> str:
+        if self.location_details:
+            return f"{self.location_name} - {self.location_details}"
+        return self.location_name or "TBD"
+
+
+@dataclass
 class TeamSnapToken:
     """OAuth token storage."""
     access_token: str
@@ -348,6 +386,76 @@ class TeamSnapClient:
         logger.info(f"Fetched {len(players)} players for team {team_id}")
         return players
 
+    def get_events(self, token: TeamSnapToken, team_id: int, games_only: bool = True) -> List[TeamSnapGame]:
+        """
+        Get events (games/practices) for a team.
+
+        Per TEAMSNAP_SCHEMA.md, Event fields:
+        - id, team_id, is_game, game_type, start_date
+        - opponent_name, location_name, additional_location_details
+        - points_for_team, points_for_opponent
+        - is_canceled, formatted_title, uniform
+
+        Args:
+            token: OAuth token
+            team_id: TeamSnap team ID
+            games_only: If True, only return actual games (is_game=True)
+        """
+        if token.is_expired:
+            token = self.refresh_token(token)
+
+        events_data = self._api_request(
+            token.access_token,
+            '/events',
+            params={'team_id': team_id}
+        )
+
+        games = []
+        for item in events_data.get('collection', {}).get('items', []):
+            event = {d['name']: d['value'] for d in item['data']}
+
+            is_game = event.get('is_game', False)
+
+            # Filter to games only if requested
+            if games_only and not is_game:
+                logger.debug(f"Skipping non-game event: {event.get('formatted_title')}")
+                continue
+
+            # Skip canceled games
+            if event.get('is_canceled', False):
+                logger.debug(f"Skipping canceled game: {event.get('formatted_title')}")
+                continue
+
+            # Parse start_date (ISO format per schema)
+            start_date = None
+            if event.get('start_date'):
+                try:
+                    start_date = datetime.fromisoformat(
+                        event['start_date'].replace('Z', '+00:00')
+                    )
+                except (ValueError, AttributeError):
+                    logger.warning(f"Failed to parse date: {event.get('start_date')}")
+
+            games.append(TeamSnapGame(
+                id=event['id'],
+                team_id=event.get('team_id', team_id),
+                is_game=is_game,
+                game_type=event.get('game_type', 'Home'),  # "Home" or "Away"
+                start_date=start_date,
+                opponent_name=event.get('opponent_name'),
+                location_name=event.get('location_name'),
+                location_details=event.get('additional_location_details'),
+                points_for_team=event.get('points_for_team'),
+                points_for_opponent=event.get('points_for_opponent'),
+                formatted_title=event.get('formatted_title'),
+                is_canceled=event.get('is_canceled', False),
+                uniform=event.get('uniform'),
+                raw_data=event  # Store full response for JSONB
+            ))
+
+        logger.info(f"Fetched {len(games)} games for team {team_id}")
+        return games
+
     # Note: _get_member_contacts removed - email_addresses and phone_numbers
     # are directly on the Member object per TEAMSNAP_SCHEMA.md
 
@@ -395,6 +503,8 @@ class TeamSnapSyncService:
             'teams_updated': 0,
             'players_created': 0,
             'players_updated': 0,
+            'games_created': 0,
+            'games_updated': 0,
             'teams': []
         }
 
@@ -407,6 +517,8 @@ class TeamSnapSyncService:
                 synced['teams_updated'] += 1
             synced['players_created'] += result.get('players_created', 0)
             synced['players_updated'] += result.get('players_updated', 0)
+            synced['games_created'] += result.get('games_created', 0)
+            synced['games_updated'] += result.get('games_updated', 0)
 
         return synced
 
@@ -456,6 +568,18 @@ class TeamSnapSyncService:
             else:
                 players_updated += 1
 
+        # Sync games/events
+        ts_games = self.client.get_events(token, ts_team.id, games_only=True)
+        games_created = 0
+        games_updated = 0
+
+        for ts_game in ts_games:
+            game_result = self._sync_game(team, ts_game)
+            if game_result.get('created'):
+                games_created += 1
+            else:
+                games_updated += 1
+
         self.db.commit()
 
         return {
@@ -464,7 +588,9 @@ class TeamSnapSyncService:
             'team_code': team.team_code,
             'created': created,
             'players_created': players_created,
-            'players_updated': players_updated
+            'players_updated': players_updated,
+            'games_created': games_created,
+            'games_updated': games_updated
         }
 
     def _sync_player(self, user, team, ts_player: TeamSnapPlayer) -> Dict:
@@ -573,6 +699,55 @@ class TeamSnapSyncService:
                 logger.info(f"Linked {user.email} as parent of {player.full_name}")
 
         return {'created': created, 'player_id': player.id}
+
+    def _sync_game(self, team, ts_game: TeamSnapGame) -> Dict:
+        """
+        Sync a game from TeamSnap.
+
+        Note: This creates/updates games from TeamSnap schedule.
+        Games are NOT automatically linked to recordings - that must be done
+        manually or by matching session_id when a recording is created.
+        """
+        from ..models import Game
+
+        # Find game by TeamSnap ID
+        game = self.db.query(Game).filter(
+            Game.teamsnap_event_id == ts_game.id
+        ).first()
+
+        created = False
+        if not game:
+            # Create new game record from TeamSnap
+            game = Game(
+                team_id=team.id,
+                opponent=ts_game.opponent_name,
+                location=ts_game.full_location,
+                game_date=ts_game.start_date or datetime.utcnow(),
+                game_type='league',  # Default, TeamSnap doesn't provide this
+                is_home=ts_game.is_home,
+                home_score=ts_game.points_for_team if ts_game.is_home else ts_game.points_for_opponent,
+                away_score=ts_game.points_for_opponent if ts_game.is_home else ts_game.points_for_team,
+                teamsnap_event_id=ts_game.id,
+                teamsnap_data=ts_game.raw_data,
+                is_processed=False  # No recording yet
+            )
+            self.db.add(game)
+            self.db.flush()
+            created = True
+            logger.info(f"Created game: {team.name} vs {ts_game.opponent_name} ({ts_game.start_date})")
+        else:
+            # Update game info from TeamSnap
+            game.opponent = ts_game.opponent_name
+            game.location = ts_game.full_location
+            game.game_date = ts_game.start_date or game.game_date
+            game.is_home = ts_game.is_home
+            # Update scores if TeamSnap has them
+            if ts_game.points_for_team is not None:
+                game.home_score = ts_game.points_for_team if ts_game.is_home else ts_game.points_for_opponent
+                game.away_score = ts_game.points_for_opponent if ts_game.is_home else ts_game.points_for_team
+            game.teamsnap_data = ts_game.raw_data  # Update JSONB
+
+        return {'created': created, 'game_id': game.id}
 
     def _generate_team_code(self, team_name: str) -> str:
         """Generate unique team code from name."""
@@ -827,6 +1002,177 @@ def register_teamsnap_routes(app, db):
                 for p in players
             ]
         })
+
+    # -------------------------------------------------------------------------
+    # Games Schedule API
+    # -------------------------------------------------------------------------
+
+    @app.route('/api/games/schedule')
+    def api_games_schedule():
+        """
+        Get all games - from TeamSnap and with recording status.
+
+        Shows:
+        - Team vs Opponent
+        - Date/time
+        - Location (home/away)
+        - Whether recording exists (has video)
+        - Link to video if available
+        """
+        from ..models import Game, Team
+        from sqlalchemy import desc
+
+        team_id = request.args.get('team_id', type=int)
+
+        query = db.query(Game).join(Team)
+        if team_id:
+            query = query.filter(Game.team_id == team_id)
+
+        games = query.order_by(desc(Game.game_date)).all()
+
+        return jsonify({
+            'count': len(games),
+            'games': [
+                {
+                    'id': g.id,
+                    'team': {
+                        'id': g.team.id,
+                        'name': g.team.name,
+                        'team_code': g.team.team_code
+                    },
+                    'opponent': g.opponent,
+                    'game_date': g.game_date.isoformat() if g.game_date else None,
+                    'location': g.location,
+                    'is_home': g.is_home,
+                    'home_away': 'Home' if g.is_home else 'Away',
+                    'score': {
+                        'home': g.home_score,
+                        'away': g.away_score,
+                        'display': f"{g.home_score or '-'} - {g.away_score or '-'}"
+                    },
+                    # Recording/video info
+                    'has_recording': g.session_id is not None,
+                    'is_processed': g.is_processed,
+                    'session_id': g.session_id,
+                    'panorama_url': g.panorama_url,
+                    'thumbnail_url': g.thumbnail_url,
+                    # TeamSnap link
+                    'from_teamsnap': g.teamsnap_event_id is not None,
+                    'teamsnap_event_id': g.teamsnap_event_id,
+                    # Status indicators
+                    'status': _get_game_status(g)
+                }
+                for g in games
+            ]
+        })
+
+    def _get_game_status(game):
+        """Determine game status for display."""
+        if game.is_processed and game.panorama_url:
+            return 'ready'  # Video ready to view
+        elif game.session_id:
+            return 'processing'  # Has recording, being processed
+        elif game.teamsnap_event_id:
+            return 'scheduled'  # From TeamSnap, no recording yet
+        else:
+            return 'manual'  # Manually created game
+
+    @app.route('/api/games/<int:game_id>')
+    def api_game_detail(game_id):
+        """Get detailed game info including video paths."""
+        from ..models import Game, Recording
+
+        game = db.query(Game).get(game_id)
+        if not game:
+            return jsonify({'error': 'Game not found'}), 404
+
+        recordings = db.query(Recording).filter(Recording.game_id == game_id).all()
+
+        return jsonify({
+            'id': game.id,
+            'team': {
+                'id': game.team.id,
+                'name': game.team.name
+            },
+            'opponent': game.opponent,
+            'game_date': game.game_date.isoformat() if game.game_date else None,
+            'location': game.location,
+            'is_home': game.is_home,
+            'score': {
+                'home': game.home_score,
+                'away': game.away_score
+            },
+            'duration_seconds': game.duration_seconds,
+            # Video files
+            'session_id': game.session_id,
+            'panorama_url': game.panorama_url,
+            'thumbnail_url': game.thumbnail_url,
+            'is_processed': game.is_processed,
+            'processed_at': game.processed_at.isoformat() if game.processed_at else None,
+            # Individual camera recordings
+            'recordings': [
+                {
+                    'id': r.id,
+                    'camera_id': r.camera_id,
+                    'camera_position': r.camera_position,
+                    'file_path': r.file_path,
+                    'file_size': r.file_size,
+                    'duration_seconds': r.duration_seconds,
+                    'resolution': r.resolution
+                }
+                for r in recordings
+            ],
+            # TeamSnap data
+            'teamsnap_event_id': game.teamsnap_event_id,
+            'teamsnap_data': game.teamsnap_data,
+            # Metadata
+            'metadata': game.metadata
+        })
+
+    @app.route('/api/games/<int:game_id>/link-recording', methods=['POST'])
+    def api_link_recording(game_id):
+        """
+        Link a recording session to a game.
+
+        Used when a recording was made but not auto-linked to TeamSnap game.
+        """
+        from ..models import Game
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        game = db.query(Game).get(game_id)
+        if not game:
+            return jsonify({'error': 'Game not found'}), 404
+
+        data = request.get_json()
+        session_id = data.get('session_id')
+
+        if not session_id:
+            return jsonify({'error': 'session_id required'}), 400
+
+        # Check session_id isn't already linked
+        existing = db.query(Game).filter(Game.session_id == session_id).first()
+        if existing and existing.id != game_id:
+            return jsonify({
+                'error': f'Session already linked to game {existing.id}'
+            }), 400
+
+        game.session_id = session_id
+        db.commit()
+
+        return jsonify({
+            'success': True,
+            'message': f'Linked session {session_id} to game {game_id}'
+        })
+
+    @app.route('/schedule')
+    def schedule_page():
+        """Games schedule page."""
+        from flask import render_template_string
+
+        return render_template_string(SCHEDULE_HTML)
 
     @app.route('/api/data/explorer')
     def api_data_explorer():
@@ -1194,6 +1540,230 @@ def register_teamsnap_routes(app, db):
             'teams': [{'id': t.id, 'name': t.name} for t in teams]
         })
 
+
+# =============================================================================
+# Schedule HTML Template
+# =============================================================================
+
+SCHEDULE_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Schedule - Soccer Rig</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f0f4f8; color: #1a202c; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #1a472a 0%, #2d5a27 100%); color: white; padding: 1.5rem 2rem; }
+        .header-content { max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+        .nav-links { display: flex; gap: 1.5rem; }
+        .nav-links a { color: white; text-decoration: none; opacity: 0.8; }
+        .nav-links a:hover { opacity: 1; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .filters { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center; }
+        .filter-group { display: flex; align-items: center; gap: 0.5rem; }
+        .filter-group select { padding: 0.5rem; border: 2px solid #e2e8f0; border-radius: 0.5rem; }
+        .status-legend { display: flex; gap: 1rem; margin-left: auto; }
+        .legend-item { display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .status-ready { background: #10b981; }
+        .status-processing { background: #f59e0b; }
+        .status-scheduled { background: #3b82f6; }
+        .status-manual { background: #94a3b8; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 1rem; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th { background: #f8fafc; text-align: left; padding: 1rem; font-weight: 600; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+        td { padding: 1rem; border-bottom: 1px solid #e2e8f0; }
+        tr:hover { background: #f8fafc; }
+        .game-row { cursor: pointer; }
+        .team-name { font-weight: 600; }
+        .opponent { color: #374151; }
+        .vs { color: #94a3b8; margin: 0 0.5rem; }
+        .date { color: #64748b; font-size: 0.875rem; }
+        .location { color: #64748b; font-size: 0.875rem; }
+        .home-away { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; }
+        .home { background: #dbeafe; color: #1d4ed8; }
+        .away { background: #fef3c7; color: #92400e; }
+        .score { font-weight: 700; font-size: 1.125rem; }
+        .status-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; }
+        .badge-ready { background: #d1fae5; color: #065f46; }
+        .badge-processing { background: #fef3c7; color: #92400e; }
+        .badge-scheduled { background: #dbeafe; color: #1d4ed8; }
+        .badge-manual { background: #e2e8f0; color: #475569; }
+        .video-link { color: #10b981; text-decoration: none; font-weight: 500; }
+        .video-link:hover { text-decoration: underline; }
+        .no-video { color: #94a3b8; font-style: italic; }
+        .teamsnap-badge { background: #fef3c7; color: #92400e; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.625rem; margin-left: 0.5rem; }
+        .empty-state { text-align: center; padding: 4rem 2rem; color: #64748b; }
+        .btn { padding: 0.5rem 1rem; border-radius: 0.5rem; border: none; cursor: pointer; font-weight: 500; text-decoration: none; }
+        .btn-primary { background: #10b981; color: white; }
+        .btn-secondary { background: #e2e8f0; color: #374151; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <h1>Game Schedule</h1>
+            <div class="nav-links">
+                <a href="/dashboard">Dashboard</a>
+                <a href="/data-explorer">Data Explorer</a>
+                <a href="/schedule">Schedule</a>
+            </div>
+        </div>
+    </div>
+    <div class="container">
+        <div class="filters">
+            <div class="filter-group">
+                <label>Team:</label>
+                <select id="team-filter" onchange="loadGames()">
+                    <option value="">All Teams</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Status:</label>
+                <select id="status-filter" onchange="filterGames()">
+                    <option value="">All</option>
+                    <option value="ready">Ready to View</option>
+                    <option value="processing">Processing</option>
+                    <option value="scheduled">Scheduled</option>
+                </select>
+            </div>
+            <button class="btn btn-secondary" onclick="loadGames()">Refresh</button>
+            <div class="status-legend">
+                <div class="legend-item"><span class="status-dot status-ready"></span> Video Ready</div>
+                <div class="legend-item"><span class="status-dot status-processing"></span> Processing</div>
+                <div class="legend-item"><span class="status-dot status-scheduled"></span> Scheduled</div>
+                <div class="legend-item"><span class="status-dot status-manual"></span> No Video</div>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Match</th>
+                    <th>Location</th>
+                    <th>Score</th>
+                    <th>Status</th>
+                    <th>Video</th>
+                </tr>
+            </thead>
+            <tbody id="games-table">
+                <tr><td colspan="6" class="empty-state">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let allGames = [];
+
+        async function loadTeams() {
+            try {
+                const response = await fetch('/api/data/teams');
+                const data = await response.json();
+                const select = document.getElementById('team-filter');
+                select.innerHTML = '<option value="">All Teams</option>' +
+                    data.teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+            } catch (error) {
+                console.error('Failed to load teams:', error);
+            }
+        }
+
+        async function loadGames() {
+            try {
+                const teamId = document.getElementById('team-filter').value;
+                const url = teamId ? `/api/games/schedule?team_id=${teamId}` : '/api/games/schedule';
+                const response = await fetch(url);
+                const data = await response.json();
+                allGames = data.games;
+                filterGames();
+            } catch (error) {
+                console.error('Failed to load games:', error);
+                document.getElementById('games-table').innerHTML =
+                    '<tr><td colspan="6" class="empty-state">Failed to load games</td></tr>';
+            }
+        }
+
+        function filterGames() {
+            const statusFilter = document.getElementById('status-filter').value;
+            let games = allGames;
+
+            if (statusFilter) {
+                games = games.filter(g => g.status === statusFilter);
+            }
+
+            renderGames(games);
+        }
+
+        function renderGames(games) {
+            const tbody = document.getElementById('games-table');
+
+            if (games.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No games found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = games.map(g => {
+                const date = g.game_date ? new Date(g.game_date) : null;
+                const dateStr = date ? date.toLocaleDateString('en-US', {
+                    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+                }) : 'TBD';
+                const timeStr = date ? date.toLocaleTimeString('en-US', {
+                    hour: 'numeric', minute: '2-digit'
+                }) : '';
+
+                const statusBadge = {
+                    'ready': '<span class="status-badge badge-ready"><span class="status-dot status-ready"></span> Ready</span>',
+                    'processing': '<span class="status-badge badge-processing"><span class="status-dot status-processing"></span> Processing</span>',
+                    'scheduled': '<span class="status-badge badge-scheduled"><span class="status-dot status-scheduled"></span> Scheduled</span>',
+                    'manual': '<span class="status-badge badge-manual"><span class="status-dot status-manual"></span> No Video</span>'
+                }[g.status] || '';
+
+                const videoLink = g.panorama_url
+                    ? `<a href="${g.panorama_url}" class="video-link">Watch</a>`
+                    : g.has_recording
+                        ? '<span class="no-video">Processing...</span>'
+                        : '<span class="no-video">-</span>';
+
+                const teamsnapBadge = g.from_teamsnap ? '<span class="teamsnap-badge">TS</span>' : '';
+
+                return `
+                    <tr class="game-row" onclick="viewGame(${g.id})">
+                        <td>
+                            <div class="date">${dateStr}</div>
+                            <div class="date">${timeStr}</div>
+                        </td>
+                        <td>
+                            <span class="team-name">${g.team.name}</span>
+                            <span class="vs">vs</span>
+                            <span class="opponent">${g.opponent || 'TBD'}</span>
+                            ${teamsnapBadge}
+                        </td>
+                        <td>
+                            <span class="home-away ${g.is_home ? 'home' : 'away'}">${g.home_away}</span>
+                            <div class="location">${g.location || 'TBD'}</div>
+                        </td>
+                        <td class="score">${g.score.display}</td>
+                        <td>${statusBadge}</td>
+                        <td>${videoLink}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function viewGame(gameId) {
+            // Could open a modal or navigate to game detail page
+            console.log('View game:', gameId);
+            // window.location.href = `/games/${gameId}`;
+        }
+
+        // Initial load
+        loadTeams();
+        loadGames();
+    </script>
+</body>
+</html>
+"""
 
 # =============================================================================
 # Data Explorer HTML Template

@@ -334,7 +334,7 @@ config_manager = ConfigManager()
 # Flask Routes
 # =============================================================================
 
-def register_admin_routes(app: Flask, db=None):
+def register_admin_routes(app: Flask):
     """Register admin routes."""
 
     # Print credentials on startup
@@ -375,8 +375,12 @@ def register_admin_routes(app: Flask, db=None):
     def admin_config():
         """Configuration page."""
         if request.method == 'POST':
-            for key in request.form:
-                if key in ConfigManager.CONFIG_SCHEMA:
+            # Handle boolean checkboxes specially - unchecked boxes don't appear in form
+            for key, schema in ConfigManager.CONFIG_SCHEMA.items():
+                if schema['type'] == 'bool':
+                    # Checkbox present = True, absent = False
+                    config_manager.set(key, key in request.form)
+                elif key in request.form:
                     config_manager.set(key, request.form[key])
             return redirect(url_for('admin_config'))
 

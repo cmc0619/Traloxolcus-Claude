@@ -66,8 +66,8 @@ class TeamSnapPlayer:
         if self.birthday:
             try:
                 return int(self.birthday[:4])
-            except:
-                pass
+            except (ValueError, IndexError, TypeError):
+                logger.debug(f"Failed to parse birth year from: {self.birthday}")
         return None
 
 
@@ -220,7 +220,7 @@ class TeamSnapClient:
             'client_id': self.client_id,
             'client_secret': self.client_secret,
             'redirect_uri': self.redirect_uri
-        })
+        }, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -242,7 +242,7 @@ class TeamSnapClient:
             'refresh_token': token.refresh_token,
             'client_id': self.client_id,
             'client_secret': self.client_secret
-        })
+        }, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -269,7 +269,7 @@ class TeamSnapClient:
             'Content-Type': 'application/json'
         }
         url = f"{TEAMSNAP_API_URL}{endpoint}"
-        response = requests.get(url, headers=headers, params=params)
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         return response.json()
 
@@ -495,7 +495,7 @@ class TeamSnapSyncService:
         try:
             ts_teams = self.client.get_teams(token)
         except Exception as e:
-            logger.error(f"Failed to fetch teams: {e}")
+            logger.exception(f"Failed to fetch teams: {e}")
             return {'error': str(e)}
 
         synced = {
@@ -629,7 +629,7 @@ class TeamSnapSyncService:
             player = Player(
                 first_name=ts_player.first_name,
                 last_name=ts_player.last_name,
-                birth_year=ts_player.birth_year or 2010,  # Default if unknown
+                birth_year=ts_player.birth_year,  # None if unknown - don't fake it
                 default_position=position,
                 teamsnap_member_id=ts_player.id
             )
@@ -956,6 +956,11 @@ def register_teamsnap_routes(app, db):
         """Get all teams in the system (for dropdowns)."""
         from ..models import Team
 
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
         teams = db.query(Team).filter(Team.is_active == True).all()
 
         return jsonify({
@@ -977,6 +982,11 @@ def register_teamsnap_routes(app, db):
     def api_data_players():
         """Get all players (for dropdowns and linking)."""
         from ..models import Player
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         team_id = request.args.get('team_id', type=int)
 

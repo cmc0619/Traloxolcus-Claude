@@ -796,7 +796,13 @@ def register_teamsnap_routes(app, db):
         # Generate state for CSRF protection
         state = secrets.token_urlsafe(32)
         session['teamsnap_state'] = state
-        session['teamsnap_return_url'] = request.args.get('return_url', '/')
+        
+        # Validate return_url to prevent open redirect
+        return_url = request.args.get('return_url', '/')
+        # Only allow relative URLs (no protocol, no double slashes)
+        if not return_url.startswith('/') or '//' in return_url or ':' in return_url:
+            return_url = '/'
+        session['teamsnap_return_url'] = return_url
 
         return redirect(client.get_auth_url(state))
 

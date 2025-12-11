@@ -10,9 +10,13 @@ from flask import Flask
 from flask_cors import CORS
 from sqlalchemy import text
 
+# Global debug flag - controls debug mode across the application
+DEBUG = os.environ.get('DEBUG', 'false').lower() in ('true', '1', 'yes')
+
 # Configure logging
+log_level = logging.DEBUG if DEBUG else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -51,8 +55,11 @@ def create_app():
     app.config['TEAMSNAP_CLIENT_ID'] = os.environ.get('TEAMSNAP_CLIENT_ID', '')
     app.config['TEAMSNAP_CLIENT_SECRET'] = os.environ.get('TEAMSNAP_CLIENT_SECRET', '')
 
-    # Enable CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # Enable CORS - configurable via environment variable
+    cors_origins = os.environ.get('CORS_ORIGINS', '*')
+    if cors_origins != '*':
+        cors_origins = [o.strip() for o in cors_origins.split(',')]
+    CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 
     # Initialize database
     engine = get_engine(app.config['DATABASE_URL'])
@@ -64,7 +71,7 @@ def create_app():
 
     # Register routes
     register_auth_routes(app, db)
-    register_admin_routes(app, db)
+    register_admin_routes(app)  # No db param needed
     register_heatmap_routes(app, db)
     register_social_routes(app, db)
 
@@ -184,4 +191,4 @@ def create_app():
 # For development: python app.py
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=DEBUG)

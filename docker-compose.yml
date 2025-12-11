@@ -20,6 +20,7 @@ services:
       - TEAMSNAP_CLIENT_SECRET=${TEAMSNAP_CLIENT_SECRET:-}
       - SSL_MODE=${SSL_MODE:-self-signed}  # self-signed or letsencrypt
       - DOMAIN=${DOMAIN:-localhost}
+      - PROCESSING_URL=http://processing:5100
     volumes:
       - video_storage:/app/storage
       - ssl_certs:/etc/letsencrypt

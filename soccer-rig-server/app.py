@@ -8,6 +8,7 @@ import os
 import logging
 from flask import Flask
 from flask_cors import CORS
+from sqlalchemy import text
 
 # Configure logging
 logging.basicConfig(
@@ -77,10 +78,30 @@ def create_app():
 
     # Note: /dashboard route is registered in auth.py with login protection
 
-    # Health check
+    # Health check - tests DB connectivity
     @app.route('/health')
     def health():
-        return {'status': 'ok'}
+        try:
+            # Test database connection
+            session = db()
+            session.execute(text('SELECT 1'))
+            session.close()
+            return {'status': 'ok', 'database': 'connected'}
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return {'status': 'error', 'database': 'disconnected'}, 503
+
+    # Analytics/ML status endpoint
+    @app.route('/analytics/status')
+    def analytics_status():
+        # ML pipeline runs on processing server, not viewer
+        # Return a status indicating ML is available but runs externally
+        processing_url = os.environ.get('PROCESSING_URL', '')
+        return {
+            'running': bool(processing_url),
+            'models_loaded': bool(processing_url),
+            'processing_server': processing_url or 'not configured'
+        }
 
     logger.info("Soccer Rig Viewer Server initialized")
     return app

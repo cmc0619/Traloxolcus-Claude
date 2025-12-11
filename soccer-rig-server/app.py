@@ -70,14 +70,12 @@ def create_app():
         except ImportError:
             logger.warning("TeamSnap integration not available")
 
-    # Dashboard route
+    # Index route - static landing page
     @app.route('/')
     def index():
         return app.send_static_file('index.html')
 
-    @app.route('/dashboard')
-    def dashboard():
-        return app.send_static_file('dashboard.html')
+    # Note: /dashboard route is registered in auth.py with login protection
 
     # Health check
     @app.route('/health')

@@ -80,14 +80,8 @@ Track player stats across multiple games
 - [ ] Game-by-game breakdown
 - [ ] Comparison charts
 
-### Heat Map Generation
-Player positioning visualization
-- [ ] Position tracking from ML pipeline
-- [ ] Interactive heat map canvas
-- [ ] Per-player and team-wide views
-- [ ] Time-slice filtering
-
-### Parent Purchase Portal - NO CLAUDE. THATS NOT WHY WERE DOING THIS
+### Parent Purchase Portal
+(Intentionally deferred—focus is on content delivery, not monetization at this stage)
 
 
 ### AI Commentary
@@ -96,7 +90,8 @@ Player positioning visualization
 - [ ] Multiple voice options
 - [ ] Real-time vs post-game modes
 
-### Referee Incident Review - NO CLAUDE. REFS DONT LOSE GAMES. LACK OF PREPARATION DOES
+### Referee Incident Review
+(Out of scope—system focuses on player/team performance, not officiating review)
 
 
 ---

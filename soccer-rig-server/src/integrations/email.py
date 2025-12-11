@@ -213,8 +213,8 @@ class EmailService:
                     item = self._queue.get(timeout=1)
                     self._send_email(**item)
                     self._queue.task_done()
-            except Exception as e:
-                logger.error(f"Queue processing error: {e}")
+            except Exception:
+                logger.exception("Queue processing error - email may not have been sent")
 
     # -------------------------------------------------------------------------
     # Core Sending
@@ -512,7 +512,7 @@ class NotificationDispatcher:
             game_id: ID of the game
             context: Additional context (clip_url, minute, etc.)
         """
-        from .models import Player, User, Notification, NotificationFrequency
+        from ..models import Player, User, Notification, NotificationFrequency
 
         # Get player and their parents
         player = self.db.query(Player).get(player_id)

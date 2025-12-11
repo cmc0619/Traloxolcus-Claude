@@ -194,8 +194,25 @@ class SocialMediaExporter:
             'width': int(video_stream['width']),
             'height': int(video_stream['height']),
             'duration': float(video_stream.get('duration', 0)),
-            'fps': eval(video_stream.get('r_frame_rate', '30/1'))
+            'fps': self._parse_frame_rate(video_stream.get('r_frame_rate', '30/1'))
         }
+
+    def _parse_frame_rate(self, rate_str: str) -> float:
+        """Safely parse frame rate string like '30/1' or '30'."""
+        try:
+            if '/' in rate_str:
+                num, denom = rate_str.split('/', 1)
+                return float(num) / float(denom)
+            return float(rate_str)
+        except (ValueError, ZeroDivisionError):
+            return 30.0  # Default fallback
+
+    def _sanitize_text(self, text: str) -> str:
+        """Escape text for FFmpeg drawtext filter to prevent command injection."""
+        if not text:
+            return ''
+        # Escape characters that have special meaning in drawtext
+        return text.replace("\\", "\\\\").replace("'", "'\\''").replace(":", "\\:")
 
     def _build_filter_chain(
         self,
@@ -216,9 +233,9 @@ class SocialMediaExporter:
         # Scale to target resolution
         filters.append(f"scale={target_w}:{target_h}")
 
-        # Add text overlays
+        # Add text overlays (sanitize all text to prevent FFmpeg command injection)
         if self.config.show_event_type and event_type:
-            event_display = self._format_event_type(event_type)
+            event_display = self._sanitize_text(self._format_event_type(event_type))
             # Event type at top
             filters.append(
                 f"drawtext=text='{event_display}':"
@@ -229,8 +246,9 @@ class SocialMediaExporter:
 
         if self.config.show_player_name and player_name:
             # Player name below event
+            safe_name = self._sanitize_text(player_name)
             filters.append(
-                f"drawtext=text='{player_name}':"
+                f"drawtext=text='{safe_name}':"
                 f"fontsize=48:fontcolor=white:"
                 f"borderw=2:bordercolor=black:"
                 f"x=(w-text_w)/2:y=180"
@@ -238,8 +256,9 @@ class SocialMediaExporter:
 
         if self.config.show_score and score:
             # Score at bottom
+            safe_score = self._sanitize_text(score)
             filters.append(
-                f"drawtext=text='{score}':"
+                f"drawtext=text='{safe_score}':"
                 f"fontsize=36:fontcolor=white:"
                 f"borderw=2:bordercolor=black:"
                 f"x=(w-text_w)/2:y=h-150"
@@ -247,8 +266,9 @@ class SocialMediaExporter:
 
         if game_info:
             # Game info at very bottom
+            safe_info = self._sanitize_text(game_info)
             filters.append(
-                f"drawtext=text='{game_info}':"
+                f"drawtext=text='{safe_info}':"
                 f"fontsize=28:fontcolor=white:"
                 f"borderw=2:bordercolor=black:"
                 f"x=(w-text_w)/2:y=h-100"
@@ -357,11 +377,13 @@ class SocialMediaExporter:
 
 def register_social_routes(app, db):
     """Register social media export routes."""
-    from flask import jsonify, request, send_file, render_template_string
+    from flask import jsonify, request, send_file, render_template_string, session
+    from ..auth import login_required
 
     exporter = SocialMediaExporter()
 
     @app.route('/api/social/export', methods=['POST'])
+    @login_required
     def api_social_export():
         """Export a clip for social media."""
         from ..models import Clip, Game, GameEvent, Player
@@ -435,10 +457,19 @@ def register_social_routes(app, db):
         return jsonify(result)
 
     @app.route('/api/social/download/<filename>')
+    @login_required
     def api_social_download(filename: str):
         """Download exported social clip."""
+        # Prevent path traversal
+        if '/' in filename or '\\' in filename or filename.startswith('.'):
+            return jsonify({'error': 'Invalid filename'}), 400
+
         output_dir = os.path.join(app.config.get('UPLOAD_FOLDER', '/tmp'), 'social')
         file_path = os.path.join(output_dir, filename)
+
+        # Verify the resolved path is within the output directory
+        if not os.path.abspath(file_path).startswith(os.path.abspath(output_dir)):
+            return jsonify({'error': 'Invalid filename'}), 400
 
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
@@ -446,6 +477,7 @@ def register_social_routes(app, db):
         return send_file(file_path, as_attachment=True)
 
     @app.route('/api/social/highlight-reel', methods=['POST'])
+    @login_required
     def api_social_highlight_reel():
         """Generate a highlight reel from multiple clips."""
         from ..models import Clip, GameEvent

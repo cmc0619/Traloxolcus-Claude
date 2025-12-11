@@ -63,7 +63,14 @@ generate_self_signed() {
 # =============================================================================
 run_migrations() {
     echo "==> Waiting for database..."
+    MAX_RETRIES=60  # 60 seconds timeout
+    RETRY_COUNT=0
     while ! python -c "from sqlalchemy import create_engine; e = create_engine('$DATABASE_URL'); e.connect()" 2>/dev/null; do
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+            echo "ERROR: Database not available after ${MAX_RETRIES} seconds"
+            exit 1
+        fi
         sleep 1
     done
     echo "==> Database ready"

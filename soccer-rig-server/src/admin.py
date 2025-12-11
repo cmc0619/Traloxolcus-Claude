@@ -334,7 +334,7 @@ config_manager = ConfigManager()
 # Flask Routes
 # =============================================================================
 
-def register_admin_routes(app: Flask):
+def register_admin_routes(app: Flask, db=None):
     """Register admin routes."""
 
     # Print credentials on startup

@@ -41,7 +41,7 @@ class ProcessingPipeline:
 
         # Initialize components
         self.ingest = IngestServer(config.server, config.storage)
-        self.stitcher = VideoStitcher(config.stitcher, config.storage)
+        self.stitcher = VideoStitcher(config)
         self.ml_pipeline = MLPipeline(config.ml) if config.ml.enabled else None
         self.push_service = PushService(config.push) if config.push.enabled else None
 

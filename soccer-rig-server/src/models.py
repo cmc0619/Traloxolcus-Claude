@@ -349,7 +349,7 @@ class Game(Base):
     thumbnail_url = Column(String(500))
 
     # Metadata from processing
-    metadata = Column(JSONB)  # Flexible JSON for extra data
+    game_metadata = Column(JSONB)  # Flexible JSON for extra data
 
     # TeamSnap integration
     teamsnap_event_id = Column(Integer, index=True)  # TeamSnap event/game ID

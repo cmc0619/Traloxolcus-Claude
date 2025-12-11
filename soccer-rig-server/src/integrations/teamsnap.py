@@ -1126,7 +1126,7 @@ def register_teamsnap_routes(app, db):
             'teamsnap_event_id': game.teamsnap_event_id,
             'teamsnap_data': game.teamsnap_data,
             # Metadata
-            'metadata': game.metadata
+            'game_metadata': game.game_metadata
         })
 
     @app.route('/api/games/<int:game_id>/link-recording', methods=['POST'])

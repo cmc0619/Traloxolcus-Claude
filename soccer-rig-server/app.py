@@ -120,12 +120,12 @@ def create_app():
     @app.route('/api/v1/stats')
     def api_stats():
         """Dashboard statistics."""
+        session = None
         try:
             session = db()
             total_games = session.query(Game).count()
             total_recordings = session.query(Recording).count()
             total_teams = session.query(Team).count()
-            session.close()
             return {
                 'total_sessions': total_games,
                 'total_recordings': total_recordings,
@@ -133,19 +133,29 @@ def create_app():
                 'storage_used_gb': 0,
                 'processing_queue': 0
             }
-        except Exception as e:
-            logger.error(f"Stats error: {e}")
-            return {'total_sessions': 0, 'total_recordings': 0, 'storage_used_gb': 0}
+        except Exception:
+            logger.exception("Stats error")
+            return {
+                'total_sessions': 0,
+                'total_recordings': 0,
+                'total_teams': 0,
+                'storage_used_gb': 0,
+                'processing_queue': 0
+            }
+        finally:
+            if session:
+                session.close()
 
     @app.route('/api/v1/sessions')
     def api_sessions():
         """List recording sessions (games)."""
         from flask import request
+        session = None
         try:
             session = db()
             limit = request.args.get('limit', 50, type=int)
             games = session.query(Game).order_by(Game.created_at.desc()).limit(limit).all()
-            result = {
+            return {
                 'sessions': [
                     {
                         'id': g.session_id or str(g.id),
@@ -160,11 +170,12 @@ def create_app():
                 ],
                 'count': len(games)
             }
-            session.close()
-            return result
-        except Exception as e:
-            logger.error(f"Sessions error: {e}")
+        except Exception:
+            logger.exception("Sessions error")
             return {'sessions': [], 'count': 0}
+        finally:
+            if session:
+                session.close()
 
     logger.info("Soccer Rig Viewer Server initialized")
     return app

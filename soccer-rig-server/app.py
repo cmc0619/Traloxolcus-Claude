@@ -36,7 +36,13 @@ def create_app():
                 template_folder='web/templates')
 
     # Configuration
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-change-me')
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        if os.environ.get('FLASK_ENV') == 'production':
+            raise RuntimeError("SECRET_KEY must be set in production")
+        secret_key = 'dev-secret-change-me'
+        logger.warning("Using insecure default SECRET_KEY - set SECRET_KEY environment variable")
+    app.config['SECRET_KEY'] = secret_key
     app.config['DATABASE_URL'] = os.environ.get('DATABASE_URL', 'sqlite:///soccer.db')
     app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', '/app/storage')
     app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max upload
@@ -81,15 +87,18 @@ def create_app():
     # Health check - tests DB connectivity
     @app.route('/health')
     def health():
+        session = None
         try:
             # Test database connection
             session = db()
             session.execute(text('SELECT 1'))
-            session.close()
             return {'status': 'ok', 'database': 'connected'}
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
+        except Exception:
+            logger.exception("Health check failed")
             return {'status': 'error', 'database': 'disconnected'}, 503
+        finally:
+            if session:
+                session.close()
 
     # Analytics/ML status endpoint
     @app.route('/analytics/status')

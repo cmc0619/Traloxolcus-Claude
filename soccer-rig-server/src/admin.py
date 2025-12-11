@@ -43,7 +43,7 @@ def get_or_create_admin_password() -> str:
             return password
 
     # Generate new password (8 chars - we're not Fort Knox)
-    password = secrets.token_urlsafe(6)[:8]
+    password = secrets.token_urlsafe(6)
     password_path.write_text(password)
     password_path.chmod(0o600)  # Only owner can read
 
@@ -258,8 +258,8 @@ class ConfigManager:
                 with open(self.config_file) as f:
                     saved = json.load(f)
                     self._config.update(saved)
-            except Exception as e:
-                logger.error(f"Failed to load config: {e}")
+            except (json.JSONDecodeError, OSError, ValueError):
+                logger.exception("Failed to load config file")
 
     def _save(self):
         """Save config to file."""

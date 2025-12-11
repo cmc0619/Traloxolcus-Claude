@@ -73,10 +73,31 @@
 ### Multi-language Support
 - [ ] i18n for viewer portal
 - [ ] Spanish, French
+### Season Statistics
+Track player stats across multiple games
+- [ ] Player profile pages
+- [ ] Season totals (goals, assists, shots, etc.)
+- [ ] Game-by-game breakdown
+- [ ] Comparison charts
+
+### Heat Map Generation
+Player positioning visualization
+- [ ] Position tracking from ML pipeline
+- [ ] Interactive heat map canvas
+- [ ] Per-player and team-wide views
+- [ ] Time-slice filtering
+
+### Parent Purchase Portal - NO CLAUDE. THATS NOT WHY WERE DOING THIS
+
 
 ### AI Commentary
 - [ ] Event-to-text generation
 - [ ] Text-to-speech synthesis
+- [ ] Multiple voice options
+- [ ] Real-time vs post-game modes
+
+### Referee Incident Review - NO CLAUDE. REFS DONT LOSE GAMES. LACK OF PREPARATION DOES
+
 
 ---
 

@@ -780,7 +780,7 @@ def register_teamsnap_routes(app, db):
     Any logged-in user (parent) can connect their TeamSnap account.
     When connected, all their teams are synced automatically.
     """
-    from flask import redirect, request, session, jsonify, g
+    from flask import redirect, request, session, jsonify
 
     client = TeamSnapClient()
 
@@ -1437,9 +1437,12 @@ def register_teamsnap_routes(app, db):
 
         pattern = request.args.get('pattern', '')
 
+        # Escape SQL LIKE special characters to prevent injection
+        safe_pattern = pattern.replace('%', '\\%').replace('_', '\\_')
+
         # Use JSONB ->> to extract text, then ILIKE for pattern match
         teams = db.query(Team).filter(
-            Team.teamsnap_data['division_name'].astext.ilike(f'%{pattern}%')
+            Team.teamsnap_data['division_name'].astext.ilike(f'%{safe_pattern}%', escape='\\')
         ).all()
 
         return jsonify({
@@ -1582,7 +1585,7 @@ def register_teamsnap_routes(app, db):
 
         # Use ? operator for key existence check
         teams = db.query(Team).filter(
-            text(f"teamsnap_data ? :field")
+            text("teamsnap_data ? :field")
         ).params(field=field).all()
 
         return jsonify({

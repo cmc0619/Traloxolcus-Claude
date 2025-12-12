@@ -66,8 +66,8 @@ class TeamSnapPlayer:
         if self.birthday:
             try:
                 return int(self.birthday[:4])
-            except:
-                pass
+            except (ValueError, IndexError, TypeError):
+                logger.debug(f"Failed to parse birth year from: {self.birthday}")
         return None
 
 
@@ -220,7 +220,7 @@ class TeamSnapClient:
             'client_id': self.client_id,
             'client_secret': self.client_secret,
             'redirect_uri': self.redirect_uri
-        })
+        }, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -242,7 +242,7 @@ class TeamSnapClient:
             'refresh_token': token.refresh_token,
             'client_id': self.client_id,
             'client_secret': self.client_secret
-        })
+        }, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -269,7 +269,7 @@ class TeamSnapClient:
             'Content-Type': 'application/json'
         }
         url = f"{TEAMSNAP_API_URL}{endpoint}"
-        response = requests.get(url, headers=headers, params=params)
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         return response.json()
 
@@ -495,7 +495,7 @@ class TeamSnapSyncService:
         try:
             ts_teams = self.client.get_teams(token)
         except Exception as e:
-            logger.error(f"Failed to fetch teams: {e}")
+            logger.exception("Failed to fetch teams")
             return {'error': str(e)}
 
         synced = {
@@ -629,7 +629,7 @@ class TeamSnapSyncService:
             player = Player(
                 first_name=ts_player.first_name,
                 last_name=ts_player.last_name,
-                birth_year=ts_player.birth_year or 2010,  # Default if unknown
+                birth_year=ts_player.birth_year,  # None if unknown - don't fake it
                 default_position=position,
                 teamsnap_member_id=ts_player.id
             )
@@ -796,7 +796,13 @@ def register_teamsnap_routes(app, db):
         # Generate state for CSRF protection
         state = secrets.token_urlsafe(32)
         session['teamsnap_state'] = state
-        session['teamsnap_return_url'] = request.args.get('return_url', '/')
+        
+        # Validate return_url to prevent open redirect
+        return_url = request.args.get('return_url', '/')
+        # Only allow relative URLs (no protocol, no double slashes)
+        if not return_url.startswith('/') or '//' in return_url or ':' in return_url:
+            return_url = '/'
+        session['teamsnap_return_url'] = return_url
 
         return redirect(client.get_auth_url(state))
 
@@ -956,6 +962,11 @@ def register_teamsnap_routes(app, db):
         """Get all teams in the system (for dropdowns)."""
         from ..models import Team
 
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
         teams = db.query(Team).filter(Team.is_active == True).all()
 
         return jsonify({
@@ -977,6 +988,11 @@ def register_teamsnap_routes(app, db):
     def api_data_players():
         """Get all players (for dropdowns and linking)."""
         from ..models import Player
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         team_id = request.args.get('team_id', type=int)
 
@@ -1179,6 +1195,11 @@ def register_teamsnap_routes(app, db):
         """Full data explorer - all TeamSnap imported data."""
         from ..models import Team, Player, Organization, User
 
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
         # Get all data with TeamSnap links
         teams = db.query(Team).filter(Team.teamsnap_team_id.isnot(None)).all()
         players = db.query(Player).filter(Player.teamsnap_member_id.isnot(None)).all()
@@ -1367,6 +1388,11 @@ def register_teamsnap_routes(app, db):
         from ..models import Team
         from sqlalchemy import text
 
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
         league = request.args.get('league')
         if not league:
             return jsonify({'error': 'league parameter required'}), 400
@@ -1398,6 +1424,11 @@ def register_teamsnap_routes(app, db):
         PostgreSQL JSONB feature: ->> extracts as text for LIKE/ILIKE
         """
         from ..models import Team
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         pattern = request.args.get('pattern', '')
 
@@ -1431,6 +1462,11 @@ def register_teamsnap_routes(app, db):
         """
         from ..models import Team
         from sqlalchemy import func, text
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         # Get all teams with JSONB data
         teams = db.query(Team).filter(Team.teamsnap_data.isnot(None)).all()
@@ -1475,6 +1511,11 @@ def register_teamsnap_routes(app, db):
         """
         from ..models import Team
         from sqlalchemy import text
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         path = request.args.get('path')
         value = request.args.get('value')
@@ -1526,6 +1567,11 @@ def register_teamsnap_routes(app, db):
         """
         from ..models import Team
         from sqlalchemy import text
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         field = request.args.get('field', 'league_name')
 

@@ -208,11 +208,32 @@ class SocialMediaExporter:
             return 30.0  # Default fallback
 
     def _sanitize_text(self, text: str) -> str:
-        """Escape text for FFmpeg drawtext filter to prevent command injection."""
+        """
+        Escape text for FFmpeg drawtext filter to prevent command injection.
+        
+        FFmpeg drawtext uses special syntax where certain characters have special
+        meaning. We must escape them to prevent injection attacks.
+        """
         if not text:
             return ''
-        # Escape characters that have special meaning in drawtext
-        return text.replace("\\", "\\\\").replace("'", "'\\''").replace(":", "\\:")
+        
+        # Limit text length to prevent buffer issues
+        text = text[:100]
+        
+        # Remove any control characters and newlines
+        text = ''.join(c for c in text if c.isprintable() and c not in '\n\r\t')
+        
+        # Escape characters that have special meaning in FFmpeg drawtext filter
+        # Order matters: escape backslash first
+        text = text.replace('\\', '\\\\')
+        text = text.replace("'", r"\'")
+        text = text.replace(':', '\\:')
+        text = text.replace(';', '\\;')  # Command separator
+        text = text.replace('%', '%%')   # FFmpeg format specifier
+        text = text.replace('[', '\\[')
+        text = text.replace(']', '\\]')
+        
+        return text
 
     def _build_filter_chain(
         self,
@@ -424,8 +445,8 @@ def register_social_routes(app, db):
         player_name = player.full_name if player else None
         event_type = event.event_type.value if event and event.event_type else None
 
-        # Focus position from event field position
-        focus_x = event.field_position_x if event and event.field_position_x else 0.5
+        # Focus position from event field position (use None check, 0.0 is valid)
+        focus_x = event.field_position_x if event and event.field_position_x is not None else 0.5
 
         # Game info
         game_info = f"vs {game.opponent}" if game.opponent else None
@@ -499,7 +520,7 @@ def register_social_routes(app, db):
                     'source_video': clip.game.panorama_url,
                     'start_time': clip.start_time,
                     'duration': clip.duration_seconds or 10,
-                    'focus_x': clip.event.field_position_x if clip.event else 0.5,
+                    'focus_x': clip.event.field_position_x if clip.event and clip.event.field_position_x is not None else 0.5,
                     'player_name': clip.event.player.full_name if clip.event and clip.event.player else None,
                     'event_type': clip.event.event_type.value if clip.event and clip.event.event_type else None
                 })
@@ -512,7 +533,7 @@ def register_social_routes(app, db):
                     'source_video': event.game.panorama_url,
                     'start_time': max(0, event.timestamp_seconds - 5),
                     'duration': 10,
-                    'focus_x': event.field_position_x if event.field_position_x else 0.5,
+                    'focus_x': event.field_position_x if event.field_position_x is not None else 0.5,
                     'player_name': event.player.full_name if event.player else None,
                     'event_type': event.event_type.value if event.event_type else None
                 })

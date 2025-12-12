@@ -1,0 +1,9 @@
+GitHubToken.txt
+__pycache__/
+*.pyc
+
+# Working files - not for PR
+scripts/
+pr*.json
+AI_REVIEW_COMMENTS.md
+.agent/

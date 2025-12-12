@@ -226,7 +226,7 @@ class SocialMediaExporter:
         # Escape characters that have special meaning in FFmpeg drawtext filter
         # Order matters: escape backslash first
         text = text.replace('\\', '\\\\')
-        text = text.replace("'", "'\\''")
+        text = text.replace("'", r"\'")
         text = text.replace(':', '\\:')
         text = text.replace(';', '\\;')  # Command separator
         text = text.replace('%', '%%')   # FFmpeg format specifier

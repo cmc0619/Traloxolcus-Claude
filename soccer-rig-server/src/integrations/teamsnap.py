@@ -495,7 +495,7 @@ class TeamSnapSyncService:
         try:
             ts_teams = self.client.get_teams(token)
         except Exception as e:
-            logger.exception(f"Failed to fetch teams: {e}")
+            logger.exception("Failed to fetch teams")
             return {'error': str(e)}
 
         synced = {
@@ -1195,6 +1195,11 @@ def register_teamsnap_routes(app, db):
         """Full data explorer - all TeamSnap imported data."""
         from ..models import Team, Player, Organization, User
 
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
         # Get all data with TeamSnap links
         teams = db.query(Team).filter(Team.teamsnap_team_id.isnot(None)).all()
         players = db.query(Player).filter(Player.teamsnap_member_id.isnot(None)).all()
@@ -1383,6 +1388,11 @@ def register_teamsnap_routes(app, db):
         from ..models import Team
         from sqlalchemy import text
 
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
         league = request.args.get('league')
         if not league:
             return jsonify({'error': 'league parameter required'}), 400
@@ -1414,6 +1424,11 @@ def register_teamsnap_routes(app, db):
         PostgreSQL JSONB feature: ->> extracts as text for LIKE/ILIKE
         """
         from ..models import Team
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         pattern = request.args.get('pattern', '')
 
@@ -1447,6 +1462,11 @@ def register_teamsnap_routes(app, db):
         """
         from ..models import Team
         from sqlalchemy import func, text
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         # Get all teams with JSONB data
         teams = db.query(Team).filter(Team.teamsnap_data.isnot(None)).all()
@@ -1491,6 +1511,11 @@ def register_teamsnap_routes(app, db):
         """
         from ..models import Team
         from sqlalchemy import text
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         path = request.args.get('path')
         value = request.args.get('value')
@@ -1542,6 +1567,11 @@ def register_teamsnap_routes(app, db):
         """
         from ..models import Team
         from sqlalchemy import text
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
 
         field = request.args.get('field', 'league_name')
 

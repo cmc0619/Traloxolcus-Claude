@@ -529,9 +529,18 @@ HEATMAP_VIEWER_HTML = """
             if (params.toString()) url += '?' + params.toString();
 
             fetch(url)
-                .then(r => r.json())
+                .then(r => {
+                    if (!r.ok) {
+                        if (r.status === 401) window.location.href = '/login';
+                        throw new Error(`HTTP ${r.status}`);
+                    }
+                    return r.json();
+                })
                 .then(data => renderHeatmap(data))
-                .catch(e => console.error('Failed to load heatmap', e));
+                .catch(e => {
+                    console.error('Failed to load heatmap', e);
+                    document.getElementById('meta').textContent = 'Failed to load heatmap';
+                });
         }
 
         function renderHeatmap(data) {

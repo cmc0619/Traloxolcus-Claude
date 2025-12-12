@@ -55,37 +55,23 @@ def get_or_create_admin_password() -> str:
 
 
 def print_admin_credentials():
-    """Print admin credentials to logs (called on every startup).
-    
-    In production (DEBUG=false), only prints masked password hint.
-    In development (DEBUG=true), prints full password.
-    """
+    """Print admin credentials to logs (called on every startup)."""
     password = get_or_create_admin_password()
-    debug_mode = os.environ.get('DEBUG', 'false').lower() in ('true', '1', 'yes')
 
     print("\n" + "=" * 60)
     print("SOCCER RIG ADMIN CREDENTIALS")
     print("=" * 60)
     print(f"  Username: {ADMIN_USERNAME}")
-    if debug_mode:
-        print(f"  Password: {password}")
-    else:
-        # Only show first 3 chars + masked remainder
-        print(f"  Password: {password[:3]}{'*' * (len(password) - 3)}")
-        print("  (Set DEBUG=true to show full password)")
+    print(f"  Password: {password}")
     print("=" * 60)
     print("  Use these credentials to access /admin")
     print("=" * 60 + "\n")
 
-    # Don't log passwords in production
-    if debug_mode:
-        logger.info("=" * 60)
-        logger.info("ADMIN CREDENTIALS (DEBUG MODE)")
-        logger.info(f"  Username: {ADMIN_USERNAME}")
-        logger.info(f"  Password: {password}")
-        logger.info("=" * 60)
-    else:
-        logger.info("Admin credentials configured. Set DEBUG=true to log full password.")
+    logger.info("=" * 60)
+    logger.info("ADMIN CREDENTIALS")
+    logger.info(f"  Username: {ADMIN_USERNAME}")
+    logger.info(f"  Password: {password}")
+    logger.info("=" * 60)
 
 
 def verify_admin_password(password: str) -> bool:

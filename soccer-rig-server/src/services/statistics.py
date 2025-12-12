@@ -569,9 +569,22 @@ def register_statistics_routes(app, db):
     @app.route('/api/stats/game/<int:game_id>/recalculate', methods=['POST'])
     def recalculate_game_stats(game_id: int):
         """Recalculate stats from events (after ML processing)."""
+        from ..models import Game
+        from ..auth import get_user_team_ids
+
         # Require authentication
-        if not session.get('user_id'):
+        user_id = session.get('user_id')
+        if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
+
+        # Authorization: check user has access to this game's team
+        game = db.query(Game).get(game_id)
+        if not game:
+            return jsonify({'error': 'Game not found'}), 404
+
+        authorized_team_ids = get_user_team_ids(db, user_id)
+        if game.team_id not in authorized_team_ids:
+            return jsonify({'error': 'Access denied to this game'}), 403
 
         result = stats_service.recalculate_game_stats(game_id)
         return jsonify(result)

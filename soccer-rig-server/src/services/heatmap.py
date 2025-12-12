@@ -328,16 +328,50 @@ class HeatMapService:
 
 def register_heatmap_routes(app, db):
     """Register heat map API routes."""
-    from flask import jsonify, request, render_template_string, session
+    from flask import jsonify, request, render_template_string, session, redirect, url_for
+    from ..auth import get_user_team_ids
 
     service = HeatMapService(db)
+
+    def _user_can_access_player(user_id: int, player_id: int) -> bool:
+        """Check if user has access to view player's heatmap."""
+        from ..models import Player
+        player = db.query(Player).get(player_id)
+        if not player:
+            return False
+        
+        authorized_team_ids = get_user_team_ids(db, user_id)
+        # User can access player if player is on any of user's teams
+        for team in player.teams:
+            if team.id in authorized_team_ids:
+                return True
+        return False
+
+    def _user_can_access_team(user_id: int, team_id: int) -> bool:
+        """Check if user has access to view team's heatmap."""
+        authorized_team_ids = get_user_team_ids(db, user_id)
+        return team_id in authorized_team_ids
+
+    def _user_can_access_game(user_id: int, game_id: int) -> bool:
+        """Check if user has access to view game's heatmap."""
+        from ..models import Game
+        game = db.query(Game).get(game_id)
+        if not game:
+            return False
+        authorized_team_ids = get_user_team_ids(db, user_id)
+        return game.team_id in authorized_team_ids
 
     @app.route('/api/heatmap/player/<int:player_id>')
     def api_player_heatmap(player_id: int):
         """Get heat map data for a player."""
         # Require authentication
-        if not session.get('user_id'):
+        user_id = session.get('user_id')
+        if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
+
+        # Authorization: check user has access to this player
+        if not _user_can_access_player(user_id, player_id):
+            return jsonify({'error': 'Access denied to this player'}), 403
 
         game_id = request.args.get('game_id', type=int)
         time_start = request.args.get('time_start', type=float)
@@ -356,8 +390,13 @@ def register_heatmap_routes(app, db):
     def api_team_heatmap(team_id: int):
         """Get heat maps for all players on a team."""
         # Require authentication
-        if not session.get('user_id'):
+        user_id = session.get('user_id')
+        if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
+
+        # Authorization: check user has access to this team
+        if not _user_can_access_team(user_id, team_id):
+            return jsonify({'error': 'Access denied to this team'}), 403
 
         game_id = request.args.get('game_id', type=int)
 
@@ -374,8 +413,13 @@ def register_heatmap_routes(app, db):
     def api_game_heatmap(game_id: int):
         """Get combined heat map for a game."""
         # Require authentication
-        if not session.get('user_id'):
+        user_id = session.get('user_id')
+        if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
+
+        # Authorization: check user has access to this game
+        if not _user_can_access_game(user_id, game_id):
+            return jsonify({'error': 'Access denied to this game'}), 403
 
         team_id = request.args.get('team_id', type=int)
 
@@ -389,6 +433,15 @@ def register_heatmap_routes(app, db):
     @app.route('/heatmap/player/<int:player_id>')
     def view_player_heatmap(player_id: int):
         """Interactive heat map viewer."""
+        # Require authentication for viewer page
+        user_id = session.get('user_id')
+        if not user_id:
+            return redirect(url_for('login'))
+
+        # Authorization: check user has access to this player
+        if not _user_can_access_player(user_id, player_id):
+            return "Access denied", 403
+
         game_id = request.args.get('game_id', type=int)
 
         return render_template_string(

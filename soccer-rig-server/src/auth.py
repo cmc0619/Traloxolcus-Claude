@@ -42,6 +42,45 @@ def get_current_user(db):
     return db.query(User).get(session['user_id'])
 
 
+def get_user_team_ids(db, user_id: int) -> set:
+    """Get all team IDs a user has access to.
+    
+    Access is granted through:
+    - Teams the user coaches (coached_teams)
+    - Teams the user follows (followed_teams)  
+    - Teams their children are on (via parent_player -> team_player)
+    - Admin users have access to all teams
+    
+    Returns set of team IDs.
+    """
+    from .models import User, Team
+    
+    user = db.query(User).get(user_id)
+    if not user:
+        return set()
+    
+    # Admins can see everything
+    if user.role.value == 'admin':
+        return {t.id for t in db.query(Team).all()}
+    
+    team_ids = set()
+    
+    # Teams user coaches
+    for team in user.coached_teams:
+        team_ids.add(team.id)
+    
+    # Teams user follows
+    for team in user.followed_teams:
+        team_ids.add(team.id)
+    
+    # Teams user's children are on
+    for child in user.children:
+        for team in child.teams:
+            team_ids.add(team.id)
+    
+    return team_ids
+
+
 # =============================================================================
 # Flask Routes
 # =============================================================================

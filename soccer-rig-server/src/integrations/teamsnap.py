@@ -1036,6 +1036,7 @@ def register_teamsnap_routes(app, db):
         - Link to video if available
         """
         from ..models import Game, Team
+        from ..auth import get_user_team_ids
         from sqlalchemy import desc
 
         # Require authentication
@@ -1043,11 +1044,24 @@ def register_teamsnap_routes(app, db):
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
 
+        # Get teams user has access to
+        authorized_team_ids = get_user_team_ids(db, user_id)
+        if not authorized_team_ids:
+            return jsonify({'count': 0, 'games': [], 'message': 'No teams available'})
+
         team_id = request.args.get('team_id', type=int)
 
         query = db.query(Game).join(Team)
+        
+        # Filter to authorized teams only
         if team_id:
+            # If specific team requested, verify access
+            if team_id not in authorized_team_ids:
+                return jsonify({'error': 'Access denied to this team'}), 403
             query = query.filter(Game.team_id == team_id)
+        else:
+            # Otherwise filter to all authorized teams
+            query = query.filter(Game.team_id.in_(authorized_team_ids))
 
         games = query.order_by(desc(Game.game_date)).all()
 
@@ -1438,7 +1452,8 @@ def register_teamsnap_routes(app, db):
         pattern = request.args.get('pattern', '')
 
         # Escape SQL LIKE special characters to prevent injection
-        safe_pattern = pattern.replace('%', '\\%').replace('_', '\\_')
+        # Backslash must be escaped first, then % and _
+        safe_pattern = pattern.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
 
         # Use JSONB ->> to extract text, then ILIKE for pattern match
         teams = db.query(Team).filter(

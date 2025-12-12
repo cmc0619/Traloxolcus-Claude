@@ -569,6 +569,10 @@ def register_statistics_routes(app, db):
     @app.route('/api/stats/game/<int:game_id>/recalculate', methods=['POST'])
     def recalculate_game_stats(game_id: int):
         """Recalculate stats from events (after ML processing)."""
+        # Require authentication
+        if not session.get('user_id'):
+            return jsonify({'error': 'Not authenticated'}), 401
+
         result = stats_service.recalculate_game_stats(game_id)
         return jsonify(result)
 

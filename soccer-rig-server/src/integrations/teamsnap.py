@@ -1038,6 +1038,11 @@ def register_teamsnap_routes(app, db):
         from ..models import Game, Team
         from sqlalchemy import desc
 
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
         team_id = request.args.get('team_id', type=int)
 
         query = db.query(Game).join(Team)

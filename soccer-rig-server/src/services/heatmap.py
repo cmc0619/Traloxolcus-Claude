@@ -328,13 +328,17 @@ class HeatMapService:
 
 def register_heatmap_routes(app, db):
     """Register heat map API routes."""
-    from flask import jsonify, request, render_template_string
+    from flask import jsonify, request, render_template_string, session
 
     service = HeatMapService(db)
 
     @app.route('/api/heatmap/player/<int:player_id>')
     def api_player_heatmap(player_id: int):
         """Get heat map data for a player."""
+        # Require authentication
+        if not session.get('user_id'):
+            return jsonify({'error': 'Not authenticated'}), 401
+
         game_id = request.args.get('game_id', type=int)
         time_start = request.args.get('time_start', type=float)
         time_end = request.args.get('time_end', type=float)
@@ -351,6 +355,10 @@ def register_heatmap_routes(app, db):
     @app.route('/api/heatmap/team/<int:team_id>')
     def api_team_heatmap(team_id: int):
         """Get heat maps for all players on a team."""
+        # Require authentication
+        if not session.get('user_id'):
+            return jsonify({'error': 'Not authenticated'}), 401
+
         game_id = request.args.get('game_id', type=int)
 
         heatmaps = service.generate_team_heatmap(team_id, game_id)
@@ -365,6 +373,10 @@ def register_heatmap_routes(app, db):
     @app.route('/api/heatmap/game/<int:game_id>')
     def api_game_heatmap(game_id: int):
         """Get combined heat map for a game."""
+        # Require authentication
+        if not session.get('user_id'):
+            return jsonify({'error': 'Not authenticated'}), 401
+
         team_id = request.args.get('team_id', type=int)
 
         heatmap = service.generate_combined_heatmap(game_id, team_id)

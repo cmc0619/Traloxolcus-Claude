@@ -6,3 +6,4 @@ __pycache__/
 scripts/
 pr*.json
 AI_REVIEW_COMMENTS.md
+.agent/

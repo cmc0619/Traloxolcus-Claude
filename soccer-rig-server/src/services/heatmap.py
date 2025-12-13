@@ -372,7 +372,6 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
-        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this player
         if not _user_can_access_player(user_id, player_id):
@@ -402,7 +401,6 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
-        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this team
         if not _user_can_access_team(user_id, team_id):
@@ -429,7 +427,6 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
-        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this game
         if not _user_can_access_game(user_id, game_id):
@@ -454,7 +451,6 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return redirect(url_for('login'))
-        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this player
         if not _user_can_access_player(user_id, player_id):

@@ -86,9 +86,12 @@ def create_app():
         except ImportError:
             logger.warning("TeamSnap integration not available")
 
-    # Index route - static landing page
+    # Index route - redirect to login or dashboard
     @app.route('/')
     def index():
+        from flask import session, redirect, url_for
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
         return app.send_static_file('index.html')
 
     # Note: /dashboard route is registered in auth.py with login protection

@@ -101,7 +101,18 @@ class PiCameraRecorder(BaseCameraRecorder):
                 f"{self.config.camera.resolution_height}"
             )
             self.camera_status.fps = self.config.camera.fps
-            self.camera_status.codec = self.config.camera.codec
+            
+            # Validate codec is supported
+            supported_codecs = self.get_supported_codecs()
+            if self.config.camera.codec not in supported_codecs:
+                logger.warning(
+                    f"Unsupported codec '{self.config.camera.codec}'. "
+                    f"Using 'h264'. Supported: {supported_codecs}"
+                )
+                self.camera_status.codec = "h264"
+            else:
+                self.camera_status.codec = self.config.camera.codec
+            
             self.camera_status.bitrate_mbps = self.config.camera.bitrate_mbps
 
             logger.info(f"Camera initialized: {self.camera_status.model}")

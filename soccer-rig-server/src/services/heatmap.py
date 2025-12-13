@@ -328,10 +328,16 @@ class HeatMapService:
 
 def register_heatmap_routes(app, db):
     """Register heat map API routes."""
-    from flask import jsonify, request, render_template_string, session, redirect, url_for
+    from flask import jsonify, request, render_template_string, session, redirect, url_for, g
     from ..auth import get_user_team_ids
 
     service = HeatMapService(db)
+
+    def _get_authorized_team_ids(user_id: int) -> set:
+        """Get authorized team IDs, cached per request."""
+        if not hasattr(g, '_authorized_team_ids'):
+            g._authorized_team_ids = get_user_team_ids(db, user_id)
+        return g._authorized_team_ids
 
     def _user_can_access_player(user_id: int, player_id: int) -> bool:
         """Check if user has access to view player's heatmap."""
@@ -340,7 +346,7 @@ def register_heatmap_routes(app, db):
         if not player:
             return False
         
-        authorized_team_ids = get_user_team_ids(db, user_id)
+        authorized_team_ids = _get_authorized_team_ids(user_id)
         # User can access player if player is on any of user's teams
         for team in player.teams:
             if team.id in authorized_team_ids:
@@ -349,8 +355,7 @@ def register_heatmap_routes(app, db):
 
     def _user_can_access_team(user_id: int, team_id: int) -> bool:
         """Check if user has access to view team's heatmap."""
-        authorized_team_ids = get_user_team_ids(db, user_id)
-        return team_id in authorized_team_ids
+        return team_id in _get_authorized_team_ids(user_id)
 
     def _user_can_access_game(user_id: int, game_id: int) -> bool:
         """Check if user has access to view game's heatmap."""
@@ -358,8 +363,7 @@ def register_heatmap_routes(app, db):
         game = db.query(Game).get(game_id)
         if not game:
             return False
-        authorized_team_ids = get_user_team_ids(db, user_id)
-        return game.team_id in authorized_team_ids
+        return game.team_id in _get_authorized_team_ids(user_id)
 
     @app.route('/api/heatmap/player/<int:player_id>')
     def api_player_heatmap(player_id: int):
@@ -368,6 +372,7 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
+        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this player
         if not _user_can_access_player(user_id, player_id):
@@ -397,6 +402,7 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
+        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this team
         if not _user_can_access_team(user_id, team_id):
@@ -423,6 +429,7 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
+        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this game
         if not _user_can_access_game(user_id, game_id):
@@ -447,6 +454,7 @@ def register_heatmap_routes(app, db):
         user_id = session.get('user_id')
         if not user_id:
             return redirect(url_for('login'))
+        user_id = int(user_id)  # Normalize to int for ORM
 
         # Authorization: check user has access to this player
         if not _user_can_access_player(user_id, player_id):

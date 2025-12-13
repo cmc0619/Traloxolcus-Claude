@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple, TYPE_CHECKING
 from enum import Enum
 
-# Type hints for numpy arrays when cv2 is not available
+# Import numpy for static type checking (used by type checkers, not at runtime)
 if TYPE_CHECKING:
     import numpy as np
 

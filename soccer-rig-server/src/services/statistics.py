@@ -585,22 +585,27 @@ def register_statistics_routes(app, db):
     def _user_can_access_game(user_id: int, game_id: int) -> bool:
         """Check if user has access to view game's stats."""
         from ..models import Game
-        game = db.query(Game).get(game_id)
-        if not game:
-            return False
-        return game.team_id in _get_authorized_team_ids(user_id)
+        db_session = db()
+        try:
+            game = db_session.get(Game, game_id)
+            if not game:
+                return False
+            return game.team_id in _get_authorized_team_ids(user_id)
+        finally:
+            db_session.close()
 
     def _user_can_access_player(user_id: int, player_id: int) -> bool:
         """Check if user has access to view player's stats."""
         from ..models import Player
-        player = db.query(Player).get(player_id)
-        if not player:
-            return False
-        authorized_team_ids = _get_authorized_team_ids(user_id)
-        for team in player.teams:
-            if team.id in authorized_team_ids:
-                return True
-        return False
+        db_session = db()
+        try:
+            player = db_session.get(Player, player_id)
+            if not player:
+                return False
+            authorized_team_ids = _get_authorized_team_ids(user_id)
+            return any(team.id in authorized_team_ids for team in player.teams)
+        finally:
+            db_session.close()
 
     # -------------------------------------------------------------------------
     # Game Stats Endpoints
@@ -628,13 +633,17 @@ def register_statistics_routes(app, db):
         if error:
             return error
 
-        # Authorization: check user has access to this game's team
-        game = db.query(Game).get(game_id)
-        if not game:
-            return jsonify({'error': 'Game not found'}), 404
+        # Check existence first, then authorization
+        db_session = db()
+        try:
+            game = db_session.get(Game, game_id)
+            if not game:
+                return jsonify({'error': 'Game not found'}), 404
 
-        if not _user_can_access_game(user_id, game_id):
-            return jsonify({'error': 'Access denied to this game'}), 403
+            if game.team_id not in _get_authorized_team_ids(user_id):
+                return jsonify({'error': 'Access denied to this game'}), 403
+        finally:
+            db_session.close()
 
         result = stats_service.recalculate_game_stats(game_id)
         return jsonify(result)
@@ -736,15 +745,21 @@ def register_statistics_routes(app, db):
         if error:
             return error
 
-        if not _user_can_access_team(user_id, team_id):
-            return jsonify({'error': 'Access denied to this team'}), 403
-
+        # Check existence before access (returns 404 for non-existent, not 403)
         from ..models import Team
-        team = db.query(Team).get(team_id)
-        if not team:
-            return jsonify({'error': 'Team not found'}), 404
+        db_session = db()
+        try:
+            team = db_session.get(Team, team_id)
+            if not team:
+                return jsonify({'error': 'Team not found'}), 404
 
-        season = request.args.get('season', team.season or f"Season {date.today().year}")
+            if not _user_can_access_team(user_id, team_id):
+                return jsonify({'error': 'Access denied to this team'}), 403
+
+            season = request.args.get('season', team.season or f"Season {date.today().year}")
+        finally:
+            db_session.close()
+
         stats = stats_service.get_team_season_stats(team_id, season)
 
         return jsonify({
@@ -795,6 +810,10 @@ def register_statistics_routes(app, db):
 
         if not player_ids or not team_id or not season:
             return jsonify({'error': 'player_id[], team_id, and season required'}), 400
+
+        # Limit number of players to prevent abuse
+        if len(player_ids) > 20:
+            return jsonify({'error': 'Maximum 20 players can be compared'}), 400
 
         if not _user_can_access_team(user_id, team_id):
             return jsonify({'error': 'Access denied to this team'}), 403

@@ -16,18 +16,31 @@ from datetime import datetime, date
 from typing import Optional, List
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, DateTime, Date,
-    Boolean, Float, ForeignKey, Table, Enum, UniqueConstraint, Index
+    Boolean, Float, ForeignKey, Table, Enum, UniqueConstraint, Index,
+    TypeDecorator
 )
 from sqlalchemy.orm import declarative_base, relationship, backref
 from sqlalchemy.types import JSON
 from werkzeug.security import generate_password_hash, check_password_hash
-
-# Use JSONB for PostgreSQL, fallback to JSON for SQLite
-try:
-    from sqlalchemy.dialects.postgresql import JSONB
-except ImportError:
-    JSONB = JSON  # Fallback for non-PostgreSQL databases
 import enum
+
+
+class JSONB(TypeDecorator):
+    """
+    JSONB type that falls back to JSON for non-PostgreSQL databases.
+    
+    Uses PostgreSQL's JSONB for performance when available,
+    falls back to standard JSON for SQLite and other databases.
+    """
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+            return dialect.type_descriptor(PG_JSONB())
+        return dialect.type_descriptor(JSON())
+
 
 Base = declarative_base()
 

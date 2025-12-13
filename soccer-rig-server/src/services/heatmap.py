@@ -374,6 +374,10 @@ def register_heatmap_routes(app, db):
             return jsonify({'error': 'Access denied to this player'}), 403
 
         game_id = request.args.get('game_id', type=int)
+        # Authorization: also check access to optional game_id filter
+        if game_id and not _user_can_access_game(user_id, game_id):
+            return jsonify({'error': 'Access denied to this game'}), 403
+
         time_start = request.args.get('time_start', type=float)
         time_end = request.args.get('time_end', type=float)
 
@@ -399,6 +403,9 @@ def register_heatmap_routes(app, db):
             return jsonify({'error': 'Access denied to this team'}), 403
 
         game_id = request.args.get('game_id', type=int)
+        # Authorization: also check access to optional game_id filter
+        if game_id and not _user_can_access_game(user_id, game_id):
+            return jsonify({'error': 'Access denied to this game'}), 403
 
         heatmaps = service.generate_team_heatmap(team_id, game_id)
 
@@ -422,6 +429,9 @@ def register_heatmap_routes(app, db):
             return jsonify({'error': 'Access denied to this game'}), 403
 
         team_id = request.args.get('team_id', type=int)
+        # Authorization: also check access to optional team_id filter
+        if team_id is not None and not _user_can_access_team(user_id, team_id):
+            return jsonify({'error': 'Access denied to this team'}), 403
 
         heatmap = service.generate_combined_heatmap(game_id, team_id)
 
@@ -532,6 +542,7 @@ HEATMAP_VIEWER_HTML = """
                 .then(r => {
                     if (!r.ok) {
                         if (r.status === 401) window.location.href = '/login';
+                        if (r.status === 403) throw new Error('Access denied');
                         throw new Error(`HTTP ${r.status}`);
                     }
                     return r.json();
@@ -539,7 +550,9 @@ HEATMAP_VIEWER_HTML = """
                 .then(data => renderHeatmap(data))
                 .catch(e => {
                     console.error('Failed to load heatmap', e);
-                    document.getElementById('meta').textContent = 'Failed to load heatmap';
+                    document.getElementById('meta').textContent = e.message === 'Access denied' 
+                        ? 'Access denied to this player' 
+                        : 'Failed to load heatmap';
                 });
         }
 

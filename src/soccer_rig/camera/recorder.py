@@ -1,5 +1,5 @@
 """
-Camera recorder module for 4K video capture.
+Pi Camera recorder module for 4K video capture.
 
 Uses libcamera/picamera2 on Raspberry Pi 5 for H.265/H.264 encoding.
 """
@@ -13,8 +13,14 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
-from dataclasses import dataclass, field
 import subprocess
+
+from soccer_rig.camera.base import (
+    BaseCameraRecorder, 
+    RecordingState, 
+    CameraStatus,
+    register_camera
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,34 +35,8 @@ except ImportError:
     logger.warning("picamera2 not available - running in simulation mode")
 
 
-@dataclass
-class RecordingState:
-    """Current recording state."""
-    is_recording: bool = False
-    session_id: str = ""
-    file_path: str = ""
-    start_time_local: Optional[datetime] = None
-    start_time_master: Optional[datetime] = None
-    offset_ms: float = 0.0
-    duration_sec: float = 0.0
-    dropped_frames: int = 0
-    error: Optional[str] = None
-
-
-@dataclass
-class CameraStatus:
-    """Camera hardware status."""
-    detected: bool = False
-    model: str = ""
-    resolution: str = ""
-    fps: int = 0
-    codec: str = ""
-    bitrate_mbps: int = 0
-    temperature_c: float = 0.0
-    error: Optional[str] = None
-
-
-class CameraRecorder:
+@register_camera("picamera2")
+class PiCameraRecorder(BaseCameraRecorder):
     """
     Handles 4K video recording using Pi Camera.
 
@@ -76,12 +56,10 @@ class CameraRecorder:
         Args:
             config: Configuration object with camera settings
         """
-        self.config = config
+        super().__init__(config)
         self.camera: Optional[Picamera2] = None
         self.encoder = None
         self.output = None
-        self.recording_state = RecordingState()
-        self.camera_status = CameraStatus()
         self._lock = threading.Lock()
         self._recording_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -535,3 +513,27 @@ class CameraRecorder:
 
         self.camera = None
         logger.info("Camera resources cleaned up")
+
+    # =========================================================================
+    # Capability methods
+    # =========================================================================
+
+    def supports_4k(self) -> bool:
+        """Check if camera supports 4K resolution."""
+        return True  # Pi Camera V2/HQ/V3 all support 4K
+
+    def supports_audio(self) -> bool:
+        """Check if camera supports audio recording."""
+        return self.config.camera.audio_enabled
+
+    def get_supported_resolutions(self) -> list:
+        """Get list of supported resolutions."""
+        return ["3840x2160", "1920x1080", "1280x720", "640x480"]
+
+    def get_supported_codecs(self) -> list:
+        """Get list of supported codecs."""
+        return ["h264", "h265"]
+
+
+# Backwards compatibility alias
+CameraRecorder = PiCameraRecorder

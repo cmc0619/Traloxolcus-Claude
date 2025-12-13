@@ -244,17 +244,14 @@ class PiCameraRecorder(BaseCameraRecorder):
         """Start actual hardware recording."""
         bitrate = self.config.camera.bitrate_mbps * 1_000_000
 
-        if self.config.camera.codec == "h265":
-            # Use FFmpeg for H.265 encoding
-            self.output = FfmpegOutput(
-                str(file_path),
-                audio=self.config.camera.audio_enabled
-            )
-            self.encoder = H264Encoder(bitrate=bitrate)
-        else:
-            # H.264 encoding
-            self.encoder = H264Encoder(bitrate=bitrate, quality=Quality.HIGH)
-            self.output = FfmpegOutput(str(file_path))
+        # Note: picamera2 only supports H.264 hardware encoding
+        # For H.265 output, post-processing transcoding would be required
+        # Both codec options use the same H.264 encoder for capture
+        self.encoder = H264Encoder(bitrate=bitrate, quality=Quality.HIGH)
+        self.output = FfmpegOutput(
+            str(file_path),
+            audio=self.config.camera.audio_enabled
+        )
 
         self.camera.start()
         self.camera.start_encoder(self.encoder, self.output)
@@ -531,8 +528,12 @@ class PiCameraRecorder(BaseCameraRecorder):
         return ["3840x2160", "1920x1080", "1280x720", "640x480"]
 
     def get_supported_codecs(self) -> list:
-        """Get list of supported codecs."""
-        return ["h264", "h265"]
+        """Get list of supported codecs.
+        
+        Note: picamera2 hardware encoding is H.264 only.
+        H.265/HEVC would require separate transcoding pipeline.
+        """
+        return ["h264"]
 
 
 # Backwards compatibility alias

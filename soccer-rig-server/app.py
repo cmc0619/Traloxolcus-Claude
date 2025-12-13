@@ -6,9 +6,11 @@ This module provides the create_app() factory function required by gunicorn.
 
 import os
 import logging
-from flask import Flask
+from contextlib import contextmanager
+from flask import Flask, request
 from flask_cors import CORS
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 # Global debug flag - controls debug mode across the application
 DEBUG = os.environ.get('DEBUG', 'false').lower() in ('true', '1', 'yes')
@@ -91,21 +93,29 @@ def create_app():
 
     # Note: /dashboard route is registered in auth.py with login protection
 
+    # Session context manager for clean resource handling
+    @contextmanager
+    def get_db_session():
+        """Context manager for database sessions - ensures proper cleanup."""
+        session = db()
+        try:
+            yield session
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     # Health check - tests DB connectivity
     @app.route('/health')
     def health():
-        session = None
         try:
-            # Test database connection
-            session = db()
-            session.execute(text('SELECT 1'))
-            return {'status': 'ok', 'database': 'connected'}
-        except Exception:
-            logger.exception("Health check failed")
+            with get_db_session() as session:
+                session.execute(text('SELECT 1'))
+                return {'status': 'ok', 'database': 'connected'}
+        except SQLAlchemyError:
+            logger.exception("Health check failed - database error")
             return {'status': 'error', 'database': 'disconnected'}, 503
-        finally:
-            if session:
-                session.close()
 
     # Analytics/ML status endpoint
     @app.route('/analytics/status')
@@ -122,67 +132,73 @@ def create_app():
     # ==========================================================================
     # API v1 Endpoints (for dashboard frontend)
     # ==========================================================================
+    from flask import session as flask_session
+    from sqlalchemy.orm import joinedload, selectinload
     from src.models import Game, Recording, Team
+
+    def _require_api_auth():
+        """Check if user is authenticated for API access."""
+        if not flask_session.get('user_id'):
+            return {'error': 'Not authenticated'}, 401
+        return None
 
     @app.route('/api/v1/stats')
     def api_stats():
         """Dashboard statistics."""
-        session = None
+        auth_error = _require_api_auth()
+        if auth_error:
+            return auth_error
+
         try:
-            session = db()
-            total_games = session.query(Game).count()
-            total_recordings = session.query(Recording).count()
-            total_teams = session.query(Team).count()
-            return {
-                'total_sessions': total_games,
-                'total_recordings': total_recordings,
-                'total_teams': total_teams,
-                'storage_used_gb': 0,
-                'processing_queue': 0
-            }
-        except Exception:
-            logger.exception("Stats error")
-            return {
-                'total_sessions': 0,
-                'total_recordings': 0,
-                'total_teams': 0,
-                'storage_used_gb': 0,
-                'processing_queue': 0
-            }
-        finally:
-            if session:
-                session.close()
+            with get_db_session() as session:
+                total_games = session.query(Game).count()
+                total_recordings = session.query(Recording).count()
+                total_teams = session.query(Team).count()
+                return {
+                    'total_sessions': total_games,
+                    'total_recordings': total_recordings,
+                    'total_teams': total_teams,
+                    'storage_used_gb': 0,  # TODO: Calculate from storage
+                    'processing_queue': 0   # TODO: Query processing server
+                }
+        except SQLAlchemyError:
+            logger.exception("Stats error - database query failed")
+            return {'error': 'Database error'}, 500
 
     @app.route('/api/v1/sessions')
     def api_sessions():
         """List recording sessions (games)."""
-        from flask import request
-        session = None
+        auth_error = _require_api_auth()
+        if auth_error:
+            return auth_error
+
         try:
-            session = db()
-            limit = request.args.get('limit', 50, type=int)
-            games = session.query(Game).order_by(Game.created_at.desc()).limit(limit).all()
-            return {
-                'sessions': [
-                    {
-                        'id': g.session_id or str(g.id),
-                        'name': f"{g.team.name if g.team else 'Unknown'} vs {g.opponent or 'Unknown'}",
-                        'created_at': g.created_at.isoformat() if g.created_at else None,
-                        'game_date': g.game_date.isoformat() if g.game_date else None,
-                        'complete': g.is_processed,
-                        'stitched': bool(g.panorama_url),
-                        'recordings': {}
-                    }
-                    for g in games
-                ],
-                'count': len(games)
-            }
-        except Exception:
-            logger.exception("Sessions error")
-            return {'sessions': [], 'count': 0}
-        finally:
-            if session:
-                session.close()
+            with get_db_session() as session:
+                # Clamp limit to prevent heavy queries
+                limit = min(request.args.get('limit', 50, type=int), 200)
+                # Use joinedload for one-to-one (team), selectinload for one-to-many (recordings)
+                games = session.query(Game).options(
+                    joinedload(Game.team),
+                    selectinload(Game.recordings)
+                ).order_by(Game.created_at.desc()).limit(limit).all()
+                return {
+                    'sessions': [
+                        {
+                            'id': g.session_id or str(g.id),
+                            'name': f"{g.team.name if g.team else 'Unknown'} vs {g.opponent or 'Unknown'}",
+                            'created_at': g.created_at.isoformat() if g.created_at else None,
+                            'game_date': g.game_date.isoformat() if g.game_date else None,
+                            'complete': g.is_processed,
+                            'stitched': bool(g.panorama_url),
+                            'recording_count': len(g.recordings) if g.recordings else 0
+                        }
+                        for g in games
+                    ],
+                    'count': len(games)
+                }
+        except SQLAlchemyError:
+            logger.exception("Sessions error - database query failed")
+            return {'error': 'Database error'}, 500
 
     logger.info("Soccer Rig Viewer Server initialized")
     return app

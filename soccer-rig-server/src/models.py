@@ -19,9 +19,27 @@ from sqlalchemy import (
     Boolean, Float, ForeignKey, Table, Enum, UniqueConstraint, Index
 )
 from sqlalchemy.orm import declarative_base, relationship, backref
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.types import JSON, TypeDecorator
 from werkzeug.security import generate_password_hash, check_password_hash
 import enum
+
+
+class JSONB(TypeDecorator):
+    """
+    JSONB type that falls back to JSON for non-PostgreSQL databases.
+    
+    Uses PostgreSQL's JSONB for performance when available,
+    falls back to standard JSON for SQLite and other databases.
+    """
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+            return dialect.type_descriptor(PG_JSONB())
+        return dialect.type_descriptor(JSON())
+
 
 Base = declarative_base()
 

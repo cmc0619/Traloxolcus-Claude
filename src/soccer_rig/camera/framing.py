@@ -9,18 +9,26 @@ Uses OpenCV to detect:
 Provides audio feedback when field is properly framed.
 """
 
+from __future__ import annotations  # Enable string annotations for type hints
+
 import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, TYPE_CHECKING
 from enum import Enum
+
+# Import numpy for static type checking (used by type checkers, not at runtime)
+if TYPE_CHECKING:
+    import numpy as np
 
 try:
     import cv2
     import numpy as np
     CV2_AVAILABLE = True
 except ImportError:
+    cv2 = None  # type: ignore
+    np = None  # type: ignore
     CV2_AVAILABLE = False
 
 logger = logging.getLogger(__name__)

@@ -100,6 +100,9 @@ def create_app():
         session = db()
         try:
             yield session
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
 
@@ -130,7 +133,7 @@ def create_app():
     # API v1 Endpoints (for dashboard frontend)
     # ==========================================================================
     from flask import session as flask_session
-    from sqlalchemy.orm import joinedload
+    from sqlalchemy.orm import joinedload, selectinload
     from src.models import Game, Recording, Team
 
     def _require_api_auth():
@@ -171,11 +174,12 @@ def create_app():
 
         try:
             with get_db_session() as session:
-                limit = request.args.get('limit', 50, type=int)
-                # Use joinedload to prevent N+1 queries for team and recordings
+                # Clamp limit to prevent heavy queries
+                limit = min(request.args.get('limit', 50, type=int), 200)
+                # Use joinedload for one-to-one (team), selectinload for one-to-many (recordings)
                 games = session.query(Game).options(
                     joinedload(Game.team),
-                    joinedload(Game.recordings)
+                    selectinload(Game.recordings)
                 ).order_by(Game.created_at.desc()).limit(limit).all()
                 return {
                     'sessions': [

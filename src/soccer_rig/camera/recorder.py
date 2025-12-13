@@ -528,8 +528,12 @@ class PiCameraRecorder(BaseCameraRecorder):
         return ["3840x2160", "1920x1080", "1280x720", "640x480"]
 
     def get_supported_codecs(self) -> list:
-        """Get list of supported codecs."""
-        return ["h264", "h265"]
+        """Get list of supported codecs.
+        
+        Note: picamera2 hardware encoding is H.264 only.
+        H.265/HEVC would require separate transcoding pipeline.
+        """
+        return ["h264"]
 
 
 # Backwards compatibility alias

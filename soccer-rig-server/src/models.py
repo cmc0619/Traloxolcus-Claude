@@ -16,11 +16,10 @@ from datetime import datetime, date
 from typing import Optional, List
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, DateTime, Date,
-    Boolean, Float, ForeignKey, Table, Enum, UniqueConstraint, Index,
-    TypeDecorator
+    Boolean, Float, ForeignKey, Table, Enum, UniqueConstraint, Index
 )
 from sqlalchemy.orm import declarative_base, relationship, backref
-from sqlalchemy.types import JSON
+from sqlalchemy.types import JSON, TypeDecorator
 from werkzeug.security import generate_password_hash, check_password_hash
 import enum
 

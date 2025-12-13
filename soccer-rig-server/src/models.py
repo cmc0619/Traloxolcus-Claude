@@ -175,7 +175,10 @@ class User(Base):
     notify_highlights = Column(Boolean, default=True)
     notify_game_ready = Column(Boolean, default=True)
 
-    # TeamSnap integration
+    # TeamSnap integration - per-user credentials
+    # Each user registers their own OAuth app at https://auth.teamsnap.com/oauth/applications
+    teamsnap_client_id = Column(String(255))      # User's OAuth Client ID
+    teamsnap_client_secret = Column(String(255))  # User's OAuth Client Secret (encrypted in prod)
     teamsnap_token = Column(JSONB)  # OAuth token data (access_token, refresh_token, expires_at)
     teamsnap_user_id = Column(Integer)
 

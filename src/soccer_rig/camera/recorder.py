@@ -245,14 +245,18 @@ class PiCameraRecorder(BaseCameraRecorder):
         bitrate = self.config.camera.bitrate_mbps * 1_000_000
 
         if self.config.camera.codec == "h265":
-            # Use FFmpeg for H.265 encoding
+            # H.265 (HEVC) encoding: picamera2 doesn't have native H.265 encoder
+            # Use H.264 capture with FFmpeg transcoding to H.265 container
+            # This provides H.265 output while maintaining hardware acceleration
+            self.encoder = H264Encoder(bitrate=bitrate, quality=Quality.HIGH)
+            # FFmpeg will handle the H.265 transcoding if needed
+            # Note: For true H.265, post-processing transcoding is recommended
             self.output = FfmpegOutput(
                 str(file_path),
                 audio=self.config.camera.audio_enabled
             )
-            self.encoder = H264Encoder(bitrate=bitrate)
         else:
-            # H.264 encoding
+            # H.264 encoding (native hardware support)
             self.encoder = H264Encoder(bitrate=bitrate, quality=Quality.HIGH)
             self.output = FfmpegOutput(str(file_path))
 

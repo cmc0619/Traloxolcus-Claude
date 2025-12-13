@@ -556,13 +556,66 @@ class StatisticsService:
 
 def register_statistics_routes(app, db):
     """Register statistics API routes."""
-    from flask import jsonify, request, session
+    from flask import jsonify, request, session, g
+    from ..auth import get_user_team_ids
 
     stats_service = StatisticsService(db)
+
+    # -------------------------------------------------------------------------
+    # Authorization Helpers
+    # -------------------------------------------------------------------------
+
+    def _require_auth():
+        """Check if user is authenticated, return user_id or None."""
+        user_id = session.get('user_id')
+        if not user_id:
+            return None, (jsonify({'error': 'Not authenticated'}), 401)
+        return user_id, None
+
+    def _get_authorized_team_ids(user_id: int) -> set:
+        """Get authorized team IDs, cached per request."""
+        if not hasattr(g, '_stats_authorized_team_ids'):
+            g._stats_authorized_team_ids = get_user_team_ids(db, user_id)
+        return g._stats_authorized_team_ids
+
+    def _user_can_access_team(user_id: int, team_id: int) -> bool:
+        """Check if user has access to view team's stats."""
+        return team_id in _get_authorized_team_ids(user_id)
+
+    def _user_can_access_game(user_id: int, game_id: int) -> bool:
+        """Check if user has access to view game's stats."""
+        from ..models import Game
+        game = db.query(Game).get(game_id)
+        if not game:
+            return False
+        return game.team_id in _get_authorized_team_ids(user_id)
+
+    def _user_can_access_player(user_id: int, player_id: int) -> bool:
+        """Check if user has access to view player's stats."""
+        from ..models import Player
+        player = db.query(Player).get(player_id)
+        if not player:
+            return False
+        authorized_team_ids = _get_authorized_team_ids(user_id)
+        for team in player.teams:
+            if team.id in authorized_team_ids:
+                return True
+        return False
+
+    # -------------------------------------------------------------------------
+    # Game Stats Endpoints
+    # -------------------------------------------------------------------------
 
     @app.route('/api/stats/game/<int:game_id>')
     def get_game_stats(game_id: int):
         """Get all player stats for a game."""
+        user_id, error = _require_auth()
+        if error:
+            return error
+
+        if not _user_can_access_game(user_id, game_id):
+            return jsonify({'error': 'Access denied to this game'}), 403
+
         stats = stats_service.get_game_stats(game_id)
         return jsonify({'game_id': game_id, 'players': stats})
 
@@ -570,58 +623,81 @@ def register_statistics_routes(app, db):
     def recalculate_game_stats(game_id: int):
         """Recalculate stats from events (after ML processing)."""
         from ..models import Game
-        from ..auth import get_user_team_ids
 
-        # Require authentication
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
+        user_id, error = _require_auth()
+        if error:
+            return error
 
         # Authorization: check user has access to this game's team
         game = db.query(Game).get(game_id)
         if not game:
             return jsonify({'error': 'Game not found'}), 404
 
-        authorized_team_ids = get_user_team_ids(db, user_id)
-        if game.team_id not in authorized_team_ids:
+        if not _user_can_access_game(user_id, game_id):
             return jsonify({'error': 'Access denied to this game'}), 403
 
         result = stats_service.recalculate_game_stats(game_id)
         return jsonify(result)
 
+    # -------------------------------------------------------------------------
+    # Player Stats Endpoints
+    # -------------------------------------------------------------------------
+
     @app.route('/api/stats/player/<int:player_id>')
     def get_player_stats(player_id: int):
         """Get player's stats (optionally filtered by team/season)."""
+        user_id, error = _require_auth()
+        if error:
+            return error
+
+        if not _user_can_access_player(user_id, player_id):
+            return jsonify({'error': 'Access denied to this player'}), 403
+
         team_id = request.args.get('team_id', type=int)
         season = request.args.get('season', f"Season {date.today().year}")
 
         if team_id:
+            # Also verify access to the specific team
+            if not _user_can_access_team(user_id, team_id):
+                return jsonify({'error': 'Access denied to this team'}), 403
             stats = stats_service.get_player_season_stats(player_id, team_id, season)
         else:
-            # Get stats across all teams
+            # Get stats across all teams user has access to
             from ..models import Player
             player = db.query(Player).get(player_id)
             if not player:
                 return jsonify({'error': 'Player not found'}), 404
 
+            authorized_team_ids = _get_authorized_team_ids(user_id)
             stats = {
                 'player_id': player_id,
                 'player_name': player.full_name,
                 'teams': []
             }
             for team in player.teams:
-                team_stats = stats_service.get_player_season_stats(
-                    player_id, team.id, team.season or season
-                )
-                if team_stats:
-                    stats['teams'].append(team_stats)
+                if team.id in authorized_team_ids:
+                    team_stats = stats_service.get_player_season_stats(
+                        player_id, team.id, team.season or season
+                    )
+                    if team_stats:
+                        stats['teams'].append(team_stats)
 
         return jsonify(stats)
 
     @app.route('/api/stats/player/<int:player_id>/history')
     def get_player_history(player_id: int):
         """Get player's game-by-game history."""
+        user_id, error = _require_auth()
+        if error:
+            return error
+
+        if not _user_can_access_player(user_id, player_id):
+            return jsonify({'error': 'Access denied to this player'}), 403
+
         team_id = request.args.get('team_id', type=int)
+        if team_id and not _user_can_access_team(user_id, team_id):
+            return jsonify({'error': 'Access denied to this team'}), 403
+
         limit = request.args.get('limit', 20, type=int)
 
         history = stats_service.get_player_game_history(player_id, team_id, limit)
@@ -630,18 +706,39 @@ def register_statistics_routes(app, db):
     @app.route('/api/stats/player/<int:player_id>/percentiles')
     def get_player_percentiles(player_id: int):
         """Get player's percentile rankings."""
+        user_id, error = _require_auth()
+        if error:
+            return error
+
+        if not _user_can_access_player(user_id, player_id):
+            return jsonify({'error': 'Access denied to this player'}), 403
+
         team_id = request.args.get('team_id', type=int)
         season = request.args.get('season')
 
         if not team_id or not season:
             return jsonify({'error': 'team_id and season required'}), 400
 
+        if not _user_can_access_team(user_id, team_id):
+            return jsonify({'error': 'Access denied to this team'}), 403
+
         percentiles = stats_service.get_player_percentiles(player_id, team_id, season)
         return jsonify({'player_id': player_id, 'percentiles': percentiles})
+
+    # -------------------------------------------------------------------------
+    # Team Stats Endpoints
+    # -------------------------------------------------------------------------
 
     @app.route('/api/stats/team/<int:team_id>')
     def get_team_stats(team_id: int):
         """Get all player stats for a team."""
+        user_id, error = _require_auth()
+        if error:
+            return error
+
+        if not _user_can_access_team(user_id, team_id):
+            return jsonify({'error': 'Access denied to this team'}), 403
+
         from ..models import Team
         team = db.query(Team).get(team_id)
         if not team:
@@ -660,6 +757,13 @@ def register_statistics_routes(app, db):
     @app.route('/api/stats/team/<int:team_id>/leaderboard')
     def get_leaderboard(team_id: int):
         """Get team leaderboard for a stat."""
+        user_id, error = _require_auth()
+        if error:
+            return error
+
+        if not _user_can_access_team(user_id, team_id):
+            return jsonify({'error': 'Access denied to this team'}), 403
+
         from ..models import Team
         team = db.query(Team).get(team_id)
         if not team:
@@ -681,6 +785,10 @@ def register_statistics_routes(app, db):
     @app.route('/api/stats/compare')
     def compare_players():
         """Compare multiple players."""
+        user_id, error = _require_auth()
+        if error:
+            return error
+
         player_ids = request.args.getlist('player_id', type=int)
         team_id = request.args.get('team_id', type=int)
         season = request.args.get('season')
@@ -688,5 +796,14 @@ def register_statistics_routes(app, db):
         if not player_ids or not team_id or not season:
             return jsonify({'error': 'player_id[], team_id, and season required'}), 400
 
+        if not _user_can_access_team(user_id, team_id):
+            return jsonify({'error': 'Access denied to this team'}), 403
+
+        # Verify access to all requested players
+        for player_id in player_ids:
+            if not _user_can_access_player(user_id, player_id):
+                return jsonify({'error': f'Access denied to player {player_id}'}), 403
+
         comparison = stats_service.compare_players(player_ids, team_id, season)
         return jsonify({'players': comparison})
+

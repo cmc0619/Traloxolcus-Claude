@@ -19,8 +19,14 @@ from sqlalchemy import (
     Boolean, Float, ForeignKey, Table, Enum, UniqueConstraint, Index
 )
 from sqlalchemy.orm import declarative_base, relationship, backref
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.types import JSON
 from werkzeug.security import generate_password_hash, check_password_hash
+
+# Use JSONB for PostgreSQL, fallback to JSON for SQLite
+try:
+    from sqlalchemy.dialects.postgresql import JSONB
+except ImportError:
+    JSONB = JSON  # Fallback for non-PostgreSQL databases
 import enum
 
 Base = declarative_base()

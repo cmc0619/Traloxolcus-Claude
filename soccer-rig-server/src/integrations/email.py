@@ -575,6 +575,16 @@ class NotificationDispatcher:
                 unsubscribe_url=unsubscribe_url,
                 preferences_url=preferences_url
             )
+        elif event_type == 'highlight':
+            self.email.send_highlights_ready(
+                to_email=user.email,
+                player_name=player.first_name,
+                team_name=context.get('team_name', ''),
+                game_count=context.get('game_count', 1),
+                highlights_url=context.get('highlights_url', ''),
+                unsubscribe_url=unsubscribe_url,
+                preferences_url=preferences_url
+            )
         elif event_type == 'game_ready':
             self.email.send_game_ready(
                 to_email=user.email,
@@ -589,7 +599,11 @@ class NotificationDispatcher:
 
     def _queue_for_digest(self, user, player, event_type: str, game_id: int, context: Dict):
         """Queue notification for daily/weekly digest."""
-        from .models import Notification
+        from ..models import Notification
+
+        # Ensure game_id is stored in data for digest grouping
+        data = dict(context)
+        data['game_id'] = game_id
 
         notification = Notification(
             user_id=user.id,
@@ -597,7 +611,7 @@ class NotificationDispatcher:
             notification_type=event_type,
             title=context.get('title', event_type),
             body=context.get('description', ''),
-            data=context,
+            data=data,
             digest_date=date.today()
         )
         self.db.add(notification)
@@ -605,7 +619,7 @@ class NotificationDispatcher:
 
     def send_pending_digests(self):
         """Send all pending digest notifications (run via cron)."""
-        from .models import User, Notification, NotificationFrequency
+        from ..models import User, Notification, NotificationFrequency
         from sqlalchemy import func
 
         # Get users with pending digest notifications
@@ -635,7 +649,7 @@ class NotificationDispatcher:
 
     def _send_digest_for_player(self, user, player_id: int, notifications: List):
         """Compile and send digest for a specific player."""
-        from .models import Player
+        from ..models import Player
 
         player = self.db.query(Player).get(player_id)
         if not player:

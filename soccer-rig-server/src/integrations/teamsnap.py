@@ -780,7 +780,7 @@ def register_teamsnap_routes(app, db):
     Any logged-in user (parent) can connect their TeamSnap account.
     When connected, all their teams are synced automatically.
     """
-    from flask import redirect, request, session, jsonify, g
+    from flask import redirect, request, session, jsonify
 
     client = TeamSnapClient()
 
@@ -1036,13 +1036,32 @@ def register_teamsnap_routes(app, db):
         - Link to video if available
         """
         from ..models import Game, Team
+        from ..auth import get_user_team_ids
         from sqlalchemy import desc
+
+        # Require authentication
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        # Get teams user has access to
+        authorized_team_ids = get_user_team_ids(db, user_id)
+        if not authorized_team_ids:
+            return jsonify({'count': 0, 'games': [], 'message': 'No teams available'})
 
         team_id = request.args.get('team_id', type=int)
 
         query = db.query(Game).join(Team)
+        
+        # Filter to authorized teams only
         if team_id:
+            # If specific team requested, verify access
+            if team_id not in authorized_team_ids:
+                return jsonify({'error': 'Access denied to this team'}), 403
             query = query.filter(Game.team_id == team_id)
+        else:
+            # Otherwise filter to all authorized teams
+            query = query.filter(Game.team_id.in_(authorized_team_ids))
 
         games = query.order_by(desc(Game.game_date)).all()
 
@@ -1432,9 +1451,13 @@ def register_teamsnap_routes(app, db):
 
         pattern = request.args.get('pattern', '')
 
+        # Escape SQL LIKE special characters to prevent injection
+        # Backslash must be escaped first, then % and _
+        safe_pattern = pattern.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
         # Use JSONB ->> to extract text, then ILIKE for pattern match
         teams = db.query(Team).filter(
-            Team.teamsnap_data['division_name'].astext.ilike(f'%{pattern}%')
+            Team.teamsnap_data['division_name'].astext.ilike(f'%{safe_pattern}%', escape='\\')
         ).all()
 
         return jsonify({
@@ -1577,7 +1600,7 @@ def register_teamsnap_routes(app, db):
 
         # Use ? operator for key existence check
         teams = db.query(Team).filter(
-            text(f"teamsnap_data ? :field")
+            text("teamsnap_data ? :field")
         ).params(field=field).all()
 
         return jsonify({

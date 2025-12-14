@@ -23,7 +23,7 @@ class CameraConfig:
     resolution_width: int = 3840
     resolution_height: int = 2160
     fps: int = 30
-    codec: str = "h265"  # h265 or h264
+    codec: str = "h264"  # h264 (h265 requires post-processing transcoding)
     bitrate_mbps: int = 30
     container: str = "mp4"
     audio_enabled: bool = False
@@ -34,7 +34,7 @@ class CameraConfig:
 class NetworkConfig:
     """Network configuration settings."""
     mesh_ssid: str = "SOCCER_MESH"
-    mesh_password: str = "soccer_rig_2024"
+    mesh_password: str = "soccer_rig_2024"  # Dev default - override in production
     ap_fallback_enabled: bool = True
     ap_fallback_timeout_sec: int = 30
     ap_ssid_prefix: str = "SOCCER_CAM_"

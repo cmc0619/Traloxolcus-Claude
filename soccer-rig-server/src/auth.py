@@ -221,7 +221,7 @@ def register_auth_routes(app: Flask, db):
     @app.route('/settings', methods=['GET', 'POST'])
     @login_required
     def settings():
-        """User settings - notification preferences."""
+        """User settings - notification preferences and TeamSnap integration."""
         from .models import User, NotificationFrequency
 
         user = db.query(User).get(session['user_id'])
@@ -241,10 +241,21 @@ def register_auth_routes(app: Flask, db):
             user.last_name = request.form.get('last_name', user.last_name)
             user.phone = request.form.get('phone', user.phone)
 
+            # Update TeamSnap credentials
+            teamsnap_client_id = request.form.get('teamsnap_client_id', '').strip()
+            teamsnap_client_secret = request.form.get('teamsnap_client_secret', '').strip()
+            if teamsnap_client_id:
+                user.teamsnap_client_id = teamsnap_client_id
+            if teamsnap_client_secret:
+                user.teamsnap_client_secret = teamsnap_client_secret
+
             db.commit()
             return redirect(url_for('settings') + '?saved=1')
 
-        return render_template_string(SETTINGS_HTML, user=user)
+        # Build callback URL for TeamSnap OAuth (proxy-safe)
+        callback_url = url_for('teamsnap_callback', _external=True)
+        
+        return render_template_string(SETTINGS_HTML, user=user, callback_url=callback_url)
 
     @app.route('/player/<int:player_id>')
     @login_required
@@ -718,11 +729,44 @@ SETTINGS_HTML = """
                         <input type="checkbox" name="notify_highlights" {% if user.notify_highlights %}checked{% endif %}>
                         <span>Highlight reels are ready</span>
                     </div>
-                    <div class="checkbox">
-                        <input type="checkbox" name="notify_game_ready" {% if user.notify_game_ready %}checked{% endif %}>
-                        <span>Game footage is ready to view</span>
-                    </div>
+            </div>
+
+            <div class="card">
+                <h2>TeamSnap Integration</h2>
+                <p style="color: #64748b; margin-bottom: 1rem;">Connect your TeamSnap account to automatically sync rosters and schedules.</p>
+                
+                {% if user.teamsnap_token %}
+                <div style="background: #d1fae5; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: #059669;">✓ Connected to TeamSnap</span>
+                    <a href="/auth/teamsnap/disconnect" style="color: #dc2626; font-size: 0.875rem;">Disconnect</a>
                 </div>
+                {% else %}
+                <div style="background: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                    <strong style="color: #92400e;">Setup Required:</strong>
+                    <ol style="color: #92400e; margin-left: 1.5rem; margin-top: 0.5rem; font-size: 0.875rem;">
+                        <li>Go to <a href="https://auth.teamsnap.com/oauth/applications" target="_blank" style="color: #1a472a;">TeamSnap OAuth Applications</a></li>
+                        <li>Click "New Application"</li>
+                        <li>Enter any name (e.g., "Soccer Rig")</li>
+                        <li>Set Redirect URI to: <code style="background: #fef9c3; padding: 0.25rem;">{{ callback_url }}</code></li>
+                        <li>Copy your Client ID and Secret below</li>
+                    </ol>
+                </div>
+                {% endif %}
+                
+                <div class="form-group">
+                    <label>TeamSnap Client ID</label>
+                    <input type="text" name="teamsnap_client_id" value="{{ user.teamsnap_client_id or '' }}" placeholder="Your OAuth Client ID">
+                </div>
+                <div class="form-group">
+                    <label>TeamSnap Client Secret</label>
+                    <input type="password" name="teamsnap_client_secret" value="{{ user.teamsnap_client_secret or '' }}" placeholder="Your OAuth Client Secret">
+                </div>
+                
+                {% if user.teamsnap_client_id and user.teamsnap_client_secret and not user.teamsnap_token %}
+                <a href="/auth/teamsnap" class="btn" style="display: inline-block; background: #10b981; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; text-align: center;">
+                    Connect TeamSnap
+                </a>
+                {% endif %}
             </div>
 
             <button type="submit">Save Settings</button>

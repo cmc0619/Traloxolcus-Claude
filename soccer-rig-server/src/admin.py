@@ -424,6 +424,145 @@ def register_admin_routes(app: Flask):
             'uptime': str(datetime.now() - datetime.fromtimestamp(psutil.boot_time()))
         })
 
+    # =========================================================================
+    # User Management
+    # =========================================================================
+
+    @app.route('/admin/users')
+    @admin_required
+    def admin_users():
+        """User management page."""
+        from .models import User
+        from .database import get_db_session
+        
+        with get_db_session() as db:
+            users = db.query(User).order_by(User.created_at.desc()).all()
+            user_list = [{
+                'id': u.id,
+                'email': u.email,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'role': u.role.value if u.role else 'user',
+                'teamsnap_connected': bool(u.teamsnap_token),
+                'created_at': u.created_at.isoformat() if u.created_at else None
+            } for u in users]
+        
+        return render_template_string(ADMIN_USERS_HTML, users=user_list)
+
+    @app.route('/api/admin/users', methods=['GET'])
+    @admin_required
+    def api_list_users():
+        """Get all users as JSON."""
+        from .models import User
+        from .database import get_db_session
+        
+        with get_db_session() as db:
+            users = db.query(User).order_by(User.created_at.desc()).all()
+            return jsonify({
+                'users': [{
+                    'id': u.id,
+                    'email': u.email,
+                    'first_name': u.first_name,
+                    'last_name': u.last_name,
+                    'role': u.role.value if u.role else 'user',
+                    'phone': u.phone,
+                    'teamsnap_connected': bool(u.teamsnap_token),
+                    'created_at': u.created_at.isoformat() if u.created_at else None
+                } for u in users]
+            })
+
+    @app.route('/api/admin/users/<int:user_id>', methods=['GET'])
+    @admin_required
+    def api_get_user(user_id):
+        """Get single user."""
+        from .models import User
+        from .database import get_db_session
+        
+        with get_db_session() as db:
+            user = db.query(User).get(user_id)
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            return jsonify({
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': user.role.value if user.role else 'user',
+                'phone': user.phone,
+                'teamsnap_connected': bool(user.teamsnap_token)
+            })
+
+    @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
+    @admin_required
+    def api_update_user(user_id):
+        """Update user."""
+        from .models import User, UserRole
+        from .database import get_db_session
+        
+        data = request.get_json()
+        with get_db_session() as db:
+            user = db.query(User).get(user_id)
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            
+            if 'first_name' in data:
+                user.first_name = data['first_name']
+            if 'last_name' in data:
+                user.last_name = data['last_name']
+            if 'email' in data:
+                user.email = data['email']
+            if 'phone' in data:
+                user.phone = data['phone']
+            if 'role' in data:
+                try:
+                    user.role = UserRole(data['role'])
+                except ValueError:
+                    pass
+            
+            db.commit()
+            return jsonify({'success': True})
+
+    @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+    @admin_required
+    def api_delete_user(user_id):
+        """Delete user."""
+        from .models import User
+        from .database import get_db_session
+        
+        with get_db_session() as db:
+            user = db.query(User).get(user_id)
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            
+            db.delete(user)
+            db.commit()
+            return jsonify({'success': True})
+
+    @app.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
+    @admin_required
+    def api_reset_user_password(user_id):
+        """Reset a user's password."""
+        import secrets
+        from werkzeug.security import generate_password_hash
+        from .models import User
+        from .database import get_db_session
+        
+        new_password = secrets.token_urlsafe(12)
+        
+        with get_db_session() as db:
+            user = db.query(User).get(user_id)
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            
+            user.password_hash = generate_password_hash(new_password)
+            db.commit()
+            
+            return jsonify({
+                'success': True,
+                'new_password': new_password,
+                'message': f'New password for {user.email}: {new_password}'
+            })
+
 
 # =============================================================================
 # HTML Templates
@@ -505,6 +644,7 @@ ADMIN_DASHBOARD_HTML = """
         <div class="nav">
             <a href="/admin" class="active">Dashboard</a>
             <a href="/admin/config">Configuration</a>
+            <a href="/admin/users">Users</a>
         </div>
 
         <div class="card">
@@ -590,6 +730,7 @@ ADMIN_CONFIG_HTML = """
         <div class="nav">
             <a href="/admin">Dashboard</a>
             <a href="/admin/config" class="active">Configuration</a>
+            <a href="/admin/users">Users</a>
         </div>
 
         <form method="POST">
@@ -623,6 +764,201 @@ ADMIN_CONFIG_HTML = """
             <button type="submit">Save Configuration</button>
         </form>
     </div>
+</body>
+</html>
+"""
+
+ADMIN_USERS_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users - Soccer Rig Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #f1f5f9; min-height: 100vh; }
+        .header { background: #1e293b; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+        .header h1 { font-size: 1.25rem; }
+        .header a { color: #94a3b8; text-decoration: none; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        .nav { display: flex; gap: 1rem; margin-bottom: 2rem; }
+        .nav a { padding: 0.75rem 1.5rem; background: #1e293b; border-radius: 0.5rem; color: #f1f5f9; text-decoration: none; }
+        .nav a:hover, .nav a.active { background: #6366f1; }
+        .card { background: #1e293b; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .card h2 { font-size: 1.125rem; margin-bottom: 1rem; color: #6366f1; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #334155; }
+        th { color: #94a3b8; font-weight: 500; }
+        .badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; }
+        .badge-success { background: #10b981; color: white; }
+        .badge-warning { background: #f59e0b; color: white; }
+        .badge-info { background: #6366f1; color: white; }
+        .btn { padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-size: 0.75rem; cursor: pointer; border: none; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-secondary { background: #334155; color: white; }
+        .btn:hover { opacity: 0.9; }
+        .actions { display: flex; gap: 0.5rem; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1000; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1e293b; padding: 2rem; border-radius: 1rem; width: 100%; max-width: 500px; }
+        .modal h3 { margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.25rem; color: #94a3b8; }
+        .form-group input, .form-group select { width: 100%; padding: 0.5rem; border: 1px solid #334155; border-radius: 0.375rem; background: #0f172a; color: white; }
+        .modal-actions { display: flex; gap: 1rem; margin-top: 1.5rem; }
+        .btn-primary { background: #6366f1; color: white; padding: 0.75rem 1.5rem; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚽ User Management</h1>
+        <a href="/admin/logout">Logout</a>
+    </div>
+    <div class="container">
+        <div class="nav">
+            <a href="/admin">Dashboard</a>
+            <a href="/admin/config">Configuration</a>
+            <a href="/admin/users" class="active">Users</a>
+        </div>
+
+        <div class="card">
+            <h2>Registered Users ({{ users|length }})</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>TeamSnap</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr data-user-id="{{ user.id }}">
+                        <td>{{ user.first_name }} {{ user.last_name }}</td>
+                        <td>{{ user.email }}</td>
+                        <td><span class="badge badge-info">{{ user.role }}</span></td>
+                        <td>
+                            {% if user.teamsnap_connected %}
+                            <span class="badge badge-success">Connected</span>
+                            {% else %}
+                            <span class="badge badge-warning">Not connected</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ user.created_at[:10] if user.created_at else '-' }}</td>
+                        <td class="actions">
+                            <button class="btn btn-secondary" onclick="editUser({{ user.id }})">Edit</button>
+                            <button class="btn btn-secondary" onclick="resetPassword({{ user.id }})">Reset PW</button>
+                            <button class="btn btn-danger" onclick="deleteUser({{ user.id }}, '{{ user.email }}')">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="modal" id="edit-modal">
+        <div class="modal-content">
+            <h3>Edit User</h3>
+            <input type="hidden" id="edit-user-id">
+            <div class="form-group">
+                <label>First Name</label>
+                <input type="text" id="edit-first-name">
+            </div>
+            <div class="form-group">
+                <label>Last Name</label>
+                <input type="text" id="edit-last-name">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="edit-email">
+            </div>
+            <div class="form-group">
+                <label>Phone</label>
+                <input type="tel" id="edit-phone">
+            </div>
+            <div class="form-group">
+                <label>Role</label>
+                <select id="edit-role">
+                    <option value="parent">Parent</option>
+                    <option value="player">Player</option>
+                    <option value="coach">Coach</option>
+                    <option value="family">Family</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="saveUser()">Save</button>
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function editUser(userId) {
+            const res = await fetch(`/api/admin/users/${userId}`);
+            const user = await res.json();
+            
+            document.getElementById('edit-user-id').value = userId;
+            document.getElementById('edit-first-name').value = user.first_name || '';
+            document.getElementById('edit-last-name').value = user.last_name || '';
+            document.getElementById('edit-email').value = user.email || '';
+            document.getElementById('edit-phone').value = user.phone || '';
+            document.getElementById('edit-role').value = user.role || 'parent';
+            
+            document.getElementById('edit-modal').classList.add('active');
+        }
+        
+        async function saveUser() {
+            const userId = document.getElementById('edit-user-id').value;
+            const data = {
+                first_name: document.getElementById('edit-first-name').value,
+                last_name: document.getElementById('edit-last-name').value,
+                email: document.getElementById('edit-email').value,
+                phone: document.getElementById('edit-phone').value,
+                role: document.getElementById('edit-role').value
+            };
+            
+            await fetch(`/api/admin/users/${userId}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            
+            location.reload();
+        }
+        
+        async function resetPassword(userId) {
+            if (!confirm('Reset password for this user? A new password will be shown.')) return;
+            
+            const res = await fetch(`/api/admin/users/${userId}/reset-password`, { method: 'POST' });
+            const data = await res.json();
+            
+            if (data.new_password) {
+                alert(`New password: ${data.new_password}\\n\\nPlease share this with the user securely.`);
+            }
+        }
+        
+        async function deleteUser(userId, email) {
+            if (!confirm(`Delete user ${email}? This cannot be undone.`)) return;
+            
+            await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+            location.reload();
+        }
+        
+        function closeModal() {
+            document.getElementById('edit-modal').classList.remove('active');
+        }
+        
+        // Close modal on backdrop click
+        document.getElementById('edit-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'edit-modal') closeModal();
+        });
+    </script>
 </body>
 </html>
 """

@@ -240,6 +240,9 @@ def register_auth_routes(app: Flask, db):
             user.first_name = request.form.get('first_name', user.first_name)
             user.last_name = request.form.get('last_name', user.last_name)
             user.phone = request.form.get('phone', user.phone)
+            new_email = request.form.get('email', '').strip()
+            if new_email and new_email != user.email:
+                user.email = new_email
 
             # Update TeamSnap credentials
             teamsnap_client_id = request.form.get('teamsnap_client_id', '').strip()
@@ -749,7 +752,7 @@ SETTINGS_HTML = """
                 </div>
                 <div class="form-group">
                     <label>Email</label>
-                    <input type="email" value="{{ user.email }}" disabled>
+                    <input type="email" name="email" value="{{ user.email }}">
                 </div>
                 <div class="form-group">
                     <label>Phone</label>
@@ -791,7 +794,10 @@ SETTINGS_HTML = """
                 {% if user.teamsnap_token %}
                 <div style="background: #d1fae5; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
                     <span style="color: #059669;">✓ Connected to TeamSnap</span>
-                    <a href="/auth/teamsnap/disconnect" style="color: #dc2626; font-size: 0.875rem;">Disconnect</a>
+                    <div>
+                        <a href="/teamsnap" style="color: #10b981; font-size: 0.875rem; margin-right: 1rem;">Manage →</a>
+                        <a href="/auth/teamsnap/disconnect" style="color: #dc2626; font-size: 0.875rem;">Disconnect</a>
+                    </div>
                 </div>
                 {% else %}
                 <div style="background: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">

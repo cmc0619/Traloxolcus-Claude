@@ -865,7 +865,7 @@ def register_teamsnap_routes(app, db):
             return redirect(f"{return_url}?teamsnap=connected&teams={sync_result.get('teams_created', 0)}")
 
         except Exception as e:
-            logger.error(f"TeamSnap OAuth error: {e}")
+            logger.exception("TeamSnap OAuth error")
             return jsonify({'error': str(e)}), 500
     
     @app.route('/auth/teamsnap/disconnect')
@@ -886,10 +886,17 @@ def register_teamsnap_routes(app, db):
     @app.route('/api/teamsnap/sync', methods=['POST'])
     def teamsnap_sync_all():
         """Manually trigger sync of all teams."""
+        from ..models import User
+        
         user_id = session.get('user_id')
         if not user_id:
             return jsonify({'error': 'Not authenticated'}), 401
 
+        user = db.query(User).get(user_id)
+        client = get_user_client(user)
+        if not client:
+            return jsonify({'error': 'TeamSnap not configured'}), 400
+        
         sync_service = TeamSnapSyncService(db, client)
         result = sync_service.sync_user_teams(user_id)
 
@@ -959,8 +966,8 @@ def register_teamsnap_routes(app, db):
         })
 
     @app.route('/auth/teamsnap', methods=['DELETE'])
-    def teamsnap_disconnect():
-        """Disconnect TeamSnap integration."""
+    def teamsnap_disconnect_api():
+        """Disconnect TeamSnap integration (API endpoint)."""
         from ..models import User
 
         user_id = session.get('user_id')
@@ -981,9 +988,10 @@ def register_teamsnap_routes(app, db):
 
         user_id = session.get('user_id')
         user = db.query(User).get(user_id) if user_id else None
+        client = get_user_client(user) if user else None
 
         return jsonify({
-            'configured': client.is_configured,
+            'configured': bool(client and client.is_configured),
             'connected': bool(user and user.teamsnap_token),
             'user_id': user.teamsnap_user_id if user else None
         })

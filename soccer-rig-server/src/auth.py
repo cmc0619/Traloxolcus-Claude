@@ -252,8 +252,8 @@ def register_auth_routes(app: Flask, db):
             db.commit()
             return redirect(url_for('settings') + '?saved=1')
 
-        # Build callback URL for TeamSnap OAuth
-        callback_url = request.host_url.rstrip('/') + '/auth/teamsnap/callback'
+        # Build callback URL for TeamSnap OAuth (proxy-safe)
+        callback_url = url_for('teamsnap_callback', _external=True)
         
         return render_template_string(SETTINGS_HTML, user=user, callback_url=callback_url)
 

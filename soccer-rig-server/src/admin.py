@@ -510,6 +510,13 @@ def register_admin_routes(app: Flask):
             if 'last_name' in data:
                 user.last_name = data['last_name']
             if 'email' in data:
+                # Check if email is already taken by another user
+                existing = db.query(User).filter(
+                    User.email == data['email'],
+                    User.id != user_id
+                ).first()
+                if existing:
+                    return jsonify({'error': 'Email already in use'}), 400
                 user.email = data['email']
             if 'phone' in data:
                 user.phone = data['phone']
@@ -517,7 +524,7 @@ def register_admin_routes(app: Flask):
                 try:
                     user.role = UserRole(data['role'])
                 except ValueError:
-                    pass
+                    return jsonify({'error': f"Invalid role: {data['role']}"}), 400
             
             db.commit()
             return jsonify({'success': True})
@@ -526,13 +533,32 @@ def register_admin_routes(app: Flask):
     @admin_required
     def api_delete_user(user_id):
         """Delete user."""
+        import logging
         from .models import User
         from .database import get_db_session
+        
+        logger = logging.getLogger(__name__)
         
         with get_db_session() as db:
             user = db.query(User).get(user_id)
             if not user:
                 return jsonify({'error': 'User not found'}), 404
+            
+            # Check for related data
+            if hasattr(user, 'children') and user.children:
+                return jsonify({
+                    'error': 'Cannot delete user with linked players. Remove associations first.'
+                }), 400
+            if hasattr(user, 'coached_teams') and user.coached_teams:
+                return jsonify({
+                    'error': 'Cannot delete user who is a coach. Remove team associations first.'
+                }), 400
+            
+            # Log deletion for audit trail
+            logger.warning(
+                f"User deleted by admin - ID: {user.id}, Email: {user.email}, "
+                f"Admin session: {session.get('admin_login_time')}"
+            )
             
             db.delete(user)
             db.commit()
@@ -543,10 +569,11 @@ def register_admin_routes(app: Flask):
     def api_reset_user_password(user_id):
         """Reset a user's password."""
         import secrets
-        from werkzeug.security import generate_password_hash
+        import logging
         from .models import User
         from .database import get_db_session
         
+        logger = logging.getLogger(__name__)
         new_password = secrets.token_urlsafe(12)
         
         with get_db_session() as db:
@@ -554,13 +581,21 @@ def register_admin_routes(app: Flask):
             if not user:
                 return jsonify({'error': 'User not found'}), 404
             
-            user.password_hash = generate_password_hash(new_password)
+            user.set_password(new_password)
             db.commit()
             
+            # Log the password reset for audit (password logged for secure retrieval)
+            logger.warning(
+                f"ADMIN ACTION: Password for user '{user.email}' (ID: {user.id}) was reset. "
+                f"New password: {new_password}"
+            )
+            
+            # Return success but also include password for admin convenience
+            # In production, consider only logging and not returning
             return jsonify({
                 'success': True,
                 'new_password': new_password,
-                'message': f'New password for {user.email}: {new_password}'
+                'message': f'Password for {user.email} has been reset.'
             })
 
 

@@ -242,7 +242,22 @@ def register_auth_routes(app: Flask, db):
             user.phone = request.form.get('phone', user.phone)
             new_email = request.form.get('email', '').strip()
             if new_email and new_email != user.email:
+                # Check if email is already in use
+                from .models import User as UserModel
+                existing = db.query(UserModel).filter(
+                    UserModel.email == new_email,
+                    UserModel.id != user.id
+                ).first()
+                if existing:
+                    callback_url = url_for('teamsnap_callback', _external=True)
+                    return render_template_string(
+                        SETTINGS_HTML, 
+                        user=user, 
+                        callback_url=callback_url,
+                        error='Email already in use by another account'
+                    )
                 user.email = new_email
+                session['user_email'] = new_email  # Update session
 
             # Update TeamSnap credentials
             teamsnap_client_id = request.form.get('teamsnap_client_id', '').strip()
@@ -735,6 +750,9 @@ SETTINGS_HTML = """
     <div class="container">
         {% if request.args.get('saved') %}
         <div class="saved">Settings saved successfully!</div>
+        {% endif %}
+        {% if error %}
+        <div style="background: #fee2e2; color: #dc2626; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem;">{{ error }}</div>
         {% endif %}
 
         <form method="POST">

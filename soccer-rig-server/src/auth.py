@@ -240,6 +240,24 @@ def register_auth_routes(app: Flask, db):
             user.first_name = request.form.get('first_name', user.first_name)
             user.last_name = request.form.get('last_name', user.last_name)
             user.phone = request.form.get('phone', user.phone)
+            new_email = request.form.get('email', '').strip()
+            if new_email and new_email != user.email:
+                # Check if email is already in use
+                from .models import User as UserModel
+                existing = db.query(UserModel).filter(
+                    UserModel.email == new_email,
+                    UserModel.id != user.id
+                ).first()
+                if existing:
+                    callback_url = url_for('teamsnap_callback', _external=True)
+                    return render_template_string(
+                        SETTINGS_HTML, 
+                        user=user, 
+                        callback_url=callback_url,
+                        error='Email already in use by another account'
+                    )
+                user.email = new_email
+                session['user_email'] = new_email  # Update session
 
             # Update TeamSnap credentials
             teamsnap_client_id = request.form.get('teamsnap_client_id', '').strip()
@@ -256,6 +274,59 @@ def register_auth_routes(app: Flask, db):
         callback_url = url_for('teamsnap_callback', _external=True)
         
         return render_template_string(SETTINGS_HTML, user=user, callback_url=callback_url)
+
+    @app.route('/teamsnap')
+    @login_required
+    def teamsnap_page():
+        """Dedicated TeamSnap management page."""
+        from .models import User, Team, Player
+        
+        user = db.query(User).get(session['user_id'])
+        
+        # Get teams the user has access to
+        teams = []
+        if user.teamsnap_token:
+            # Teams user coaches
+            for team in user.coached_teams:
+                teams.append({
+                    'id': team.id,
+                    'name': team.name,
+                    'team_code': team.team_code,
+                    'season': team.season,
+                    'player_count': len(team.players),
+                    'last_sync': team.teamsnap_last_sync.isoformat() if team.teamsnap_last_sync else None
+                })
+            
+            # Teams with user's children
+            for child in user.children:
+                for team in child.teams:
+                    if not any(t['id'] == team.id for t in teams):
+                        teams.append({
+                            'id': team.id,
+                            'name': team.name,
+                            'team_code': team.team_code,
+                            'season': team.season,
+                            'player_count': len(team.players),
+                            'last_sync': team.teamsnap_last_sync.isoformat() if team.teamsnap_last_sync else None
+                        })
+        
+        # Get linked children
+        children = [{
+            'id': c.id,
+            'name': c.full_name,
+            'birth_year': c.birth_year,
+            'teams': [t.name for t in c.teams]
+        } for c in user.children]
+        
+        callback_url = url_for('teamsnap_callback', _external=True)
+        
+        return render_template_string(
+            TEAMSNAP_HTML,
+            user=user,
+            teams=teams,
+            children=children,
+            callback_url=callback_url
+        )
 
     @app.route('/player/<int:player_id>')
     @login_required
@@ -680,6 +751,9 @@ SETTINGS_HTML = """
         {% if request.args.get('saved') %}
         <div class="saved">Settings saved successfully!</div>
         {% endif %}
+        {% if error %}
+        <div style="background: #fee2e2; color: #dc2626; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem;">{{ error }}</div>
+        {% endif %}
 
         <form method="POST">
             <div class="card">
@@ -696,7 +770,7 @@ SETTINGS_HTML = """
                 </div>
                 <div class="form-group">
                     <label>Email</label>
-                    <input type="email" value="{{ user.email }}" disabled>
+                    <input type="email" name="email" value="{{ user.email }}">
                 </div>
                 <div class="form-group">
                     <label>Phone</label>
@@ -738,7 +812,10 @@ SETTINGS_HTML = """
                 {% if user.teamsnap_token %}
                 <div style="background: #d1fae5; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
                     <span style="color: #059669;">✓ Connected to TeamSnap</span>
-                    <a href="/auth/teamsnap/disconnect" style="color: #dc2626; font-size: 0.875rem;">Disconnect</a>
+                    <div>
+                        <a href="/teamsnap" style="color: #10b981; font-size: 0.875rem; margin-right: 1rem;">Manage →</a>
+                        <a href="/auth/teamsnap/disconnect" style="color: #dc2626; font-size: 0.875rem;">Disconnect</a>
+                    </div>
                 </div>
                 {% else %}
                 <div style="background: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
@@ -870,6 +947,170 @@ PLAYER_PROFILE_HTML = """
             {% endif %}
         </div>
     </div>
+</body>
+</html>
+"""
+
+TEAMSNAP_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeamSnap - Soccer Rig</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f0f4f8; color: #1a202c; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #1a472a 0%, #2d5a27 100%); color: white; padding: 1.5rem 2rem; }
+        .header-content { max-width: 800px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 1.5rem; }
+        .header a { color: white; text-decoration: none; opacity: 0.8; }
+        .container { max-width: 800px; margin: 0 auto; padding: 2rem; }
+        .card { background: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card h2 { font-size: 1.125rem; margin-bottom: 1rem; color: #1a472a; }
+        .status-connected { background: #d1fae5; color: #059669; padding: 0.75rem 1rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .status-disconnected { background: #fef3c7; color: #92400e; padding: 0.75rem 1rem; border-radius: 0.5rem; }
+        .btn { padding: 0.625rem 1.25rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 600; cursor: pointer; border: none; text-decoration: none; display: inline-block; }
+        .btn-primary { background: #10b981; color: white; }
+        .btn-secondary { background: #e2e8f0; color: #475569; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn:hover { opacity: 0.9; }
+        .team-list { display: grid; gap: 0.75rem; }
+        .team-item { background: #f8fafc; padding: 1rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .team-name { font-weight: 600; }
+        .team-meta { color: #64748b; font-size: 0.875rem; }
+        .badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; background: #e2e8f0; color: #475569; }
+        .children-list { display: grid; gap: 0.5rem; }
+        .child-item { padding: 0.75rem; background: #f8fafc; border-radius: 0.5rem; }
+        .child-name { font-weight: 600; }
+        .child-teams { font-size: 0.875rem; color: #64748b; }
+        .setup-steps { background: #fef3c7; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; }
+        .setup-steps ol { margin-left: 1.25rem; color: #92400e; font-size: 0.875rem; }
+        .setup-steps code { background: #fef9c3; padding: 0.125rem 0.25rem; border-radius: 0.25rem; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.25rem; font-weight: 500; color: #374151; }
+        .form-group input { width: 100%; padding: 0.625rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem; }
+        .nav-link { display: inline-block; margin-bottom: 1rem; color: #10b981; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <h1>TeamSnap</h1>
+            <a href="/dashboard">Back to Dashboard</a>
+        </div>
+    </div>
+    <div class="container">
+        <a href="/settings" class="nav-link">← Settings</a>
+        
+        <div class="card">
+            <h2>Connection Status</h2>
+            {% if user.teamsnap_token %}
+            <div class="status-connected">
+                <span>✓ Connected to TeamSnap</span>
+                <div>
+                    <button class="btn btn-secondary" onclick="syncTeams()">Sync Now</button>
+                    <a href="/auth/teamsnap/disconnect" class="btn btn-danger">Disconnect</a>
+                </div>
+            </div>
+            {% else %}
+            <div class="status-disconnected">
+                <strong>Not Connected</strong>
+                <p style="margin-top: 0.5rem;">Set up your TeamSnap credentials to sync rosters and schedules.</p>
+            </div>
+            
+            {% if not user.teamsnap_client_id %}
+            <div class="setup-steps" style="margin-top: 1rem;">
+                <strong>Setup Instructions:</strong>
+                <ol>
+                    <li>Go to <a href="https://auth.teamsnap.com/oauth/applications" target="_blank">TeamSnap OAuth Applications</a></li>
+                    <li>Click "New Application"</li>
+                    <li>Set Redirect URI to: <code>{{ callback_url }}</code></li>
+                    <li>Copy your Client ID and Secret below</li>
+                </ol>
+            </div>
+            
+            <form method="POST" action="/settings">
+                <div class="form-group">
+                    <label>Client ID</label>
+                    <input type="text" name="teamsnap_client_id" value="{{ user.teamsnap_client_id or '' }}" placeholder="Your OAuth Client ID">
+                </div>
+                <div class="form-group">
+                    <label>Client Secret</label>
+                    <input type="password" name="teamsnap_client_secret" value="{{ user.teamsnap_client_secret or '' }}" placeholder="Your OAuth Client Secret">
+                </div>
+                <button type="submit" class="btn btn-primary">Save Credentials</button>
+            </form>
+            {% else %}
+            <div style="margin-top: 1rem;">
+                <a href="/auth/teamsnap" class="btn btn-primary">Connect TeamSnap</a>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+
+        {% if teams %}
+        <div class="card">
+            <h2>Synced Teams ({{ teams|length }})</h2>
+            <div class="team-list">
+                {% for team in teams %}
+                <div class="team-item">
+                    <div>
+                        <div class="team-name">{{ team.name }}</div>
+                        <div class="team-meta">{{ team.season or '' }} • {{ team.player_count }} players</div>
+                    </div>
+                    <span class="badge">{{ team.team_code or 'No code' }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if children %}
+        <div class="card">
+            <h2>Linked Players ({{ children|length }})</h2>
+            <div class="children-list">
+                {% for child in children %}
+                <div class="child-item">
+                    <div class="child-name">{{ child.name }}</div>
+                    <div class="child-teams">{{ child.teams|join(', ') if child.teams else 'No teams' }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if not teams and user.teamsnap_token %}
+        <div class="card">
+            <h2>No Teams Yet</h2>
+            <p style="color: #64748b; margin-bottom: 1rem;">You're connected but haven't synced any teams yet.</p>
+            <button class="btn btn-primary" onclick="syncTeams()">Sync Teams</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        async function syncTeams() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Syncing...';
+            
+            try {
+                const res = await fetch('/api/teamsnap/sync', { method: 'POST' });
+                const data = await res.json();
+                if (data.error) {
+                    alert('Sync failed: ' + data.error);
+                } else {
+                    location.reload();
+                }
+            } catch (e) {
+                alert('Sync failed: ' + e.message);
+            }
+            
+            btn.disabled = false;
+            btn.textContent = 'Sync Now';
+        }
+    </script>
 </body>
 </html>
 """
